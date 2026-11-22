@@ -26,6 +26,7 @@ import com.example.financehome.data.model.Transaction
 import com.example.financehome.data.model.TransactionType
 import com.example.financehome.ui.theme.ColorExpense
 import com.example.financehome.ui.theme.ColorIncome
+import com.example.financehome.ui.update.UpdateDialog
 import java.text.NumberFormat
 import java.time.Instant
 import java.time.LocalDate
@@ -49,6 +50,10 @@ fun DashboardScreen(
     val categoryTotals by viewModel.categoryTotals.collectAsState()
     val totalDebt by viewModel.totalDebt.collectAsState()
     val netPosition by viewModel.netPosition.collectAsState()
+
+    val availableUpdate by viewModel.availableUpdate.collectAsState()
+    val downloadState by viewModel.downloadState.collectAsState()
+    val showUpdateDialog by viewModel.showUpdateDialog.collectAsState()
 
     val currencyFormat = NumberFormat.getCurrencyInstance(Locale.US)
     val todayFormatted = LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE, MMM d"))
@@ -88,6 +93,69 @@ fun DashboardScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+
+            // App Update Available Banner
+            if (availableUpdate != null) {
+                item {
+                    Card(
+                        onClick = { viewModel.openUpdateDialog() },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primary),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        Icons.Default.SystemUpdate,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Column {
+                                    Text(
+                                        text = "Update Available (v${availableUpdate?.versionName})",
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                    Text(
+                                        text = "Tap to view changelog and install →",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                    )
+                                }
+                            }
+                            IconButton(onClick = { viewModel.dismissUpdateBanner() }) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Dismiss",
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
@@ -377,6 +445,16 @@ fun DashboardScreen(
                 Spacer(modifier = Modifier.height(80.dp))
             }
         }
+    }
+
+    if (showUpdateDialog && availableUpdate != null) {
+        val info = availableUpdate!!
+        UpdateDialog(
+            updateInfo = info,
+            downloadState = downloadState,
+            onStartDownload = { viewModel.startDownload(info.downloadUrl) },
+            onDismiss = { viewModel.dismissUpdateDialog() }
+        )
     }
 }
 

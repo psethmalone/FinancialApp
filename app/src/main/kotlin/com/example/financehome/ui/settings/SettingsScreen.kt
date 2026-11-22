@@ -19,8 +19,11 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.example.financehome.BuildConfig
+import com.example.financehome.data.model.UpdateCheckResult
 import com.example.financehome.ui.theme.ColorExpense
 import com.example.financehome.ui.theme.ColorIncome
+import com.example.financehome.ui.update.UpdateDialog
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -38,7 +41,15 @@ fun SettingsScreen(
     val hasNotificationPermission by viewModel.hasNotificationPermission.collectAsState()
     val exportState by viewModel.exportState.collectAsState()
 
+    val updateCheckResult by viewModel.updateCheckResult.collectAsState()
+    val downloadState by viewModel.downloadState.collectAsState()
+    val updateRepo by viewModel.updateRepo.collectAsState()
+    val isAutoCheckUpdatesEnabled by viewModel.isAutoCheckUpdatesEnabled.collectAsState()
+    val showUpdateDialog by viewModel.showUpdateDialog.collectAsState()
+
     var showCloudSyncDialog by remember { mutableStateOf(false) }
+    var showEditRepoDialog by remember { mutableStateOf(false) }
+    var editingRepoText by remember { mutableStateOf("") }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -287,6 +298,193 @@ fun SettingsScreen(
                 }
             }
 
+            // App Updates Card
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "App Updates",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                            Icon(
+                                imageVector = Icons.Default.SystemUpdate,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        // Version info
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Installed Version",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer
+                            ) {
+                                Text(
+                                    text = "v${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+
+                        // Auto-check toggle
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Check on Startup",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
+                                )
+                                Text(
+                                    text = "Silently look for newer versions when opening the app",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
+                            }
+                            Switch(
+                                checked = isAutoCheckUpdatesEnabled,
+                                onCheckedChange = { viewModel.setAutoCheckUpdates(it) }
+                            )
+                        }
+
+                        // Update Source / GitHub Repo
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Update Source",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
+                                )
+                                Text(
+                                    text = updateRepo,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            IconButton(
+                                onClick = {
+                                    editingRepoText = updateRepo
+                                    showEditRepoDialog = true
+                                }
+                            ) {
+                                Icon(
+                                    Icons.Default.Edit,
+                                    contentDescription = "Edit Update Source",
+                                    tint = MaterialTheme.colorScheme.outline
+                                )
+                            }
+                        }
+
+                        // Check status / Button
+                        when (val result = updateCheckResult) {
+                            is UpdateCheckResult.Checking -> {
+                                Button(
+                                    onClick = {},
+                                    enabled = false,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onPrimary
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text("Checking for updates...")
+                                }
+                            }
+                            is UpdateCheckResult.UpdateAvailable -> {
+                                Button(
+                                    onClick = { viewModel.showUpdateDialog.value = true },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = ColorIncome
+                                    )
+                                ) {
+                                    Icon(Icons.Default.SystemUpdate, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Update Available (v${result.updateInfo.versionName}) — Install")
+                                }
+                            }
+                            is UpdateCheckResult.UpToDate -> {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    OutlinedButton(
+                                        onClick = { viewModel.checkForUpdates() },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(Icons.Default.Refresh, contentDescription = null)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Check for Updates")
+                                    }
+                                    Text(
+                                        text = "✓ You are up to date (v${result.currentVersion})",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = ColorIncome
+                                    )
+                                }
+                            }
+                            is UpdateCheckResult.Error -> {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    OutlinedButton(
+                                        onClick = { viewModel.checkForUpdates() },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(Icons.Default.Refresh, contentDescription = null)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Check for Updates")
+                                    }
+                                    Text(
+                                        text = "Error: ${result.message}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                            is UpdateCheckResult.Idle -> {
+                                OutlinedButton(
+                                    onClick = { viewModel.checkForUpdates() },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Check for Updates")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // About Section
             item {
                 Column(
@@ -294,7 +492,7 @@ fun SettingsScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = "FinanceHome v1.0",
+                        text = "FinanceHome v${BuildConfig.VERSION_NAME}",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -306,6 +504,55 @@ fun SettingsScreen(
                 }
             }
         }
+    }
+
+    if (showEditRepoDialog) {
+        AlertDialog(
+            onDismissRequest = { showEditRepoDialog = false },
+            title = { Text("Update Source Repository") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Enter GitHub repository (owner/repo) or a custom JSON manifest URL:",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    OutlinedTextField(
+                        value = editingRepoText,
+                        onValueChange = { editingRepoText = it },
+                        label = { Text("Repository / URL") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (editingRepoText.isNotBlank()) {
+                            viewModel.setUpdateRepo(editingRepoText)
+                        }
+                        showEditRepoDialog = false
+                    }
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditRepoDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showUpdateDialog && updateCheckResult is UpdateCheckResult.UpdateAvailable) {
+        val info = (updateCheckResult as UpdateCheckResult.UpdateAvailable).updateInfo
+        UpdateDialog(
+            updateInfo = info,
+            downloadState = downloadState,
+            onStartDownload = { viewModel.startDownload(info.downloadUrl) },
+            onDismiss = { viewModel.dismissUpdateDialog() }
+        )
     }
 
     if (showCloudSyncDialog) {
