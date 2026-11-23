@@ -2,16 +2,18 @@ package com.example.financehome.ui.debts
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.financehome.data.model.Bill
 import com.example.financehome.data.model.Debt
 import com.example.financehome.data.model.DebtType
+import com.example.financehome.data.repository.BillRepository
 import com.example.financehome.data.repository.DebtRepository
 import com.example.financehome.domain.AmortizationRow
 import com.example.financehome.domain.DebtCalculator
+import com.example.financehome.domain.PaycheckBreakdown
+import com.example.financehome.domain.PaycheckCalculator
+import com.example.financehome.domain.PaycheckConfig
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import javax.inject.Inject
@@ -27,8 +29,11 @@ data class PayoffSimulation(
 
 @HiltViewModel
 class DebtsViewModel @Inject constructor(
-    private val debtRepo: DebtRepository
+    private val debtRepo: DebtRepository,
+    private val billRepo: BillRepository
 ) : ViewModel() {
+
+    // ── Debts ──────────────────────────────────────────────────────────────────
 
     val debts: StateFlow<List<Debt>> =
         debtRepo.getAllDebts()
@@ -46,6 +51,57 @@ class DebtsViewModel @Inject constructor(
                 initialValue = 0.0
             )
 
+    // ── Bills ──────────────────────────────────────────────────────────────────
+
+    val bills: StateFlow<List<Bill>> =
+        billRepo.getAllBills()
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = emptyList()
+            )
+
+    val totalMonthlyBills: StateFlow<Double> =
+        bills.map { list -> list.sumOf { it.amount } }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = 0.0
+            )
+
+    val totalMonthlyDebtMinimums: StateFlow<Double> =
+        debts.map { list -> list.sumOf { it.minimumPayment } }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = 0.0
+            )
+
+    val totalMonthlyFixedNut: StateFlow<Double> =
+        combine(totalMonthlyBills, totalMonthlyDebtMinimums) { billsTotal, debtsMinTotal ->
+            billsTotal + debtsMinTotal
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = 0.0
+        )
+
+    // ── Paycheck Cushion & Allocator ───────────────────────────────────────────
+
+    val paycheckConfig: StateFlow<PaycheckConfig> =
+        billRepo.paycheckConfig
+
+    val paycheckBreakdown: StateFlow<PaycheckBreakdown> =
+        combine(bills, debts, paycheckConfig) { billList, debtList, config ->
+            PaycheckCalculator.calculateBreakdown(billList, debtList, config)
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = PaycheckCalculator.calculateBreakdown(emptyList(), emptyList(), PaycheckConfig())
+        )
+
+    // ── Debt Actions ───────────────────────────────────────────────────────────
+
     fun addDebt(
         name: String,
         balance: Double,
@@ -54,7 +110,6 @@ class DebtsViewModel @Inject constructor(
         type: DebtType
     ) {
         viewModelScope.launch {
-            // apr in Debt entity is stored as a fraction (e.g. 0.2199 for 21.99%)
             val aprFraction = aprPercent / 100.0
             debtRepo.addDebt(
                 name = name,
@@ -102,5 +157,42 @@ class DebtsViewModel @Inject constructor(
             interestSaved = interestSaved,
             amortizationRows = schedule
         )
+    }
+
+    // ── Bill Actions ───────────────────────────────────────────────────────────
+
+    fun addBill(
+        name: String,
+        amount: Double,
+        dueDayOfMonth: Int,
+        category: String,
+        isAutoPay: Boolean = false,
+        notes: String? = null
+    ) {
+        viewModelScope.launch {
+            billRepo.addBill(name, amount, dueDayOfMonth, category, isAutoPay, notes)
+        }
+    }
+
+    fun updateBill(bill: Bill) {
+        viewModelScope.launch {
+            billRepo.updateBill(bill)
+        }
+    }
+
+    fun deleteBill(bill: Bill) {
+        viewModelScope.launch {
+            billRepo.deleteBill(bill)
+        }
+    }
+
+    fun toggleBillPaid(bill: Bill) {
+        viewModelScope.launch {
+            billRepo.toggleBillPaid(bill)
+        }
+    }
+
+    fun updatePaycheckConfig(config: PaycheckConfig) {
+        billRepo.updatePaycheckConfig(config)
     }
 }

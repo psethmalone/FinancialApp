@@ -6,22 +6,31 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CreditCard
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.financehome.data.model.Bill
 import com.example.financehome.data.model.Debt
 import com.example.financehome.data.model.DebtType
+import com.example.financehome.domain.PayFrequency
+import com.example.financehome.domain.PaycheckBreakdown
+import com.example.financehome.domain.PaycheckConfig
 import com.example.financehome.ui.theme.ColorExpense
 import com.example.financehome.ui.theme.ColorIncome
 import com.example.financehome.ui.theme.ColorWarning
 import java.text.NumberFormat
+import java.time.LocalDate
 import java.util.Locale
+
+enum class ObligationTab { BILLS, DEBTS }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -32,28 +41,58 @@ fun DebtsScreen(
 ) {
     val debts by viewModel.debts.collectAsState()
     val totalDebt by viewModel.totalDebt.collectAsState()
-    var showAddDialog by remember { mutableStateOf(false) }
+    val bills by viewModel.bills.collectAsState()
+    val totalMonthlyBills by viewModel.totalMonthlyBills.collectAsState()
+    val totalMonthlyDebtMinimums by viewModel.totalMonthlyDebtMinimums.collectAsState()
+    val totalMonthlyFixedNut by viewModel.totalMonthlyFixedNut.collectAsState()
+    val paycheckBreakdown by viewModel.paycheckBreakdown.collectAsState()
+    val paycheckConfig by viewModel.paycheckConfig.collectAsState()
+
+    var selectedTab by remember { mutableStateOf(ObligationTab.BILLS) }
+    var showAddDebtDialog by remember { mutableStateOf(false) }
+    var showAddBillDialog by remember { mutableStateOf(false) }
+    var showEditPaycheckDialog by remember { mutableStateOf(false) }
 
     val currencyFormat = NumberFormat.getCurrencyInstance(Locale.US)
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Debts & Payoff", fontWeight = FontWeight.Bold) },
+                title = { Text("Bills & Obligations", fontWeight = FontWeight.Bold) },
                 actions = {
-                    IconButton(onClick = { showAddDialog = true }) {
-                        Icon(Icons.Default.Add, contentDescription = "Add Debt")
+                    IconButton(
+                        onClick = {
+                            if (selectedTab == ObligationTab.BILLS) {
+                                showAddBillDialog = true
+                            } else {
+                                showAddDebtDialog = true
+                            }
+                        }
+                    ) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = if (selectedTab == ObligationTab.BILLS) "Add Bill" else "Add Debt"
+                        )
                     }
                 }
             )
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = { showAddDialog = true },
+                onClick = {
+                    if (selectedTab == ObligationTab.BILLS) {
+                        showAddBillDialog = true
+                    } else {
+                        showAddDebtDialog = true
+                    }
+                },
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary
             ) {
-                Icon(Icons.Default.Add, contentDescription = "Add Debt")
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = if (selectedTab == ObligationTab.BILLS) "Add Bill" else "Add Debt"
+                )
             }
         },
         modifier = modifier
@@ -67,7 +106,7 @@ fun DebtsScreen(
         ) {
             item {
                 Spacer(modifier = Modifier.height(4.dp))
-                // Total Debt Hero Card
+                // Combined Monthly Fixed Nut Hero Card
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(20.dp),
@@ -80,76 +119,125 @@ fun DebtsScreen(
                             .fillMaxWidth()
                             .padding(20.dp)
                     ) {
-                        Text(
-                            text = "Total Outstanding Debt",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onErrorContainer
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Total Monthly Fixed Obligations",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Icon(
+                                imageVector = Icons.Default.Receipt,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = currencyFormat.format(totalDebt),
+                            text = currencyFormat.format(totalMonthlyFixedNut) + "/mo",
                             style = MaterialTheme.typography.headlineLarge.copy(
                                 fontWeight = FontWeight.ExtraBold,
                                 color = MaterialTheme.colorScheme.onErrorContainer
                             )
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Bills: ${currencyFormat.format(totalMonthlyBills)}",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f)
+                            )
+                            Text(
+                                text = "Debt Minimums: ${currencyFormat.format(totalMonthlyDebtMinimums)}",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "${debts.size} tracked ${if (debts.size == 1) "obligation" else "obligations"}",
+                            text = "Total Outstanding Debt: ${currencyFormat.format(totalDebt)}",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
+                            color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.75f)
                         )
                     }
                 }
             }
 
-            if (debts.isEmpty()) {
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                        )
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(32.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Icon(
-                                Icons.Default.CreditCard,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.outline,
-                                modifier = Modifier.size(56.dp)
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
+            // Paycheck-to-Bill Cushion Allocator Card
+            item {
+                PaycheckPlannerCard(
+                    breakdown = paycheckBreakdown,
+                    config = paycheckConfig,
+                    currencyFormat = currencyFormat,
+                    onEditPaycheck = { showEditPaycheckDialog = true }
+                )
+            }
+
+            // Segmented Tab Switcher (Bills vs Debts)
+            item {
+                TabRow(
+                    selectedTabIndex = selectedTab.ordinal,
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                ) {
+                    Tab(
+                        selected = selectedTab == ObligationTab.BILLS,
+                        onClick = { selectedTab = ObligationTab.BILLS },
+                        text = {
                             Text(
-                                text = "No debts added yet",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+                                text = "Recurring Bills (${bills.size})",
+                                fontWeight = if (selectedTab == ObligationTab.BILLS) FontWeight.Bold else FontWeight.Normal
                             )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = "Add credit cards, auto loans, mortgages, or student loans to project payoff timelines and test extra principal payments.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Button(onClick = { showAddDialog = true }) {
-                                Text("Add Your First Debt")
-                            }
                         }
+                    )
+                    Tab(
+                        selected = selectedTab == ObligationTab.DEBTS,
+                        onClick = { selectedTab = ObligationTab.DEBTS },
+                        text = {
+                            Text(
+                                text = "Debts & Loans (${debts.size})",
+                                fontWeight = if (selectedTab == ObligationTab.DEBTS) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    )
+                }
+            }
+
+            // Tab Content
+            if (selectedTab == ObligationTab.BILLS) {
+                if (bills.isEmpty()) {
+                    item {
+                        EmptyBillsCard(onAddBill = { showAddBillDialog = true })
+                    }
+                } else {
+                    items(bills, key = { it.id }) { bill ->
+                        BillCardItem(
+                            bill = bill,
+                            currencyFormat = currencyFormat,
+                            onTogglePaid = { viewModel.toggleBillPaid(bill) },
+                            onDelete = { viewModel.deleteBill(bill) }
+                        )
                     }
                 }
             } else {
-                items(debts, key = { it.id }) { debt ->
-                    DebtCardItem(
-                        debt = debt,
-                        currencyFormat = currencyFormat,
-                        onClick = { onDebtSelected(debt) }
-                    )
+                if (debts.isEmpty()) {
+                    item {
+                        EmptyDebtsCard(onAddDebt = { showAddDebtDialog = true })
+                    }
+                } else {
+                    items(debts, key = { it.id }) { debt ->
+                        DebtCardItem(
+                            debt = debt,
+                            currencyFormat = currencyFormat,
+                            onClick = { onDebtSelected(debt) }
+                        )
+                    }
                 }
             }
 
@@ -159,16 +247,342 @@ fun DebtsScreen(
         }
     }
 
-    if (showAddDialog) {
+    if (showAddBillDialog) {
+        AddBillDialog(
+            onDismiss = { showAddBillDialog = false },
+            onAddBill = { name, amount, dueDay, category, isAutoPay, notes ->
+                viewModel.addBill(name, amount, dueDay, category, isAutoPay, notes)
+                showAddBillDialog = false
+            }
+        )
+    }
+
+    if (showAddDebtDialog) {
         AddDebtDialog(
-            onDismiss = { showAddDialog = false },
+            onDismiss = { showAddDebtDialog = false },
             onAddDebt = { name, balance, apr, minPayment, type ->
                 viewModel.addDebt(name, balance, apr, minPayment, type)
-                showAddDialog = false
+                showAddDebtDialog = false
+            }
+        )
+    }
+
+    if (showEditPaycheckDialog) {
+        EditPaycheckDialog(
+            currentConfig = paycheckConfig,
+            onDismiss = { showEditPaycheckDialog = false },
+            onSave = { newConfig ->
+                viewModel.updatePaycheckConfig(newConfig)
+                showEditPaycheckDialog = false
             }
         )
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Paycheck Planner Component
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun PaycheckPlannerCard(
+    breakdown: PaycheckBreakdown,
+    config: PaycheckConfig,
+    currencyFormat: NumberFormat,
+    onEditPaycheck: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Savings,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Column {
+                        Text(
+                            text = "Paycheck-to-Bill Cushion",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Text(
+                            text = "${config.frequency.displayName} • ${currencyFormat.format(config.typicalTakeHomePay)} pay",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                IconButton(onClick = onEditPaycheck) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = "Edit Paycheck Settings",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+            // Two-column cushion display
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Per-paycheck reserve
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = "Hold Back For Bills",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = currencyFormat.format(breakdown.perPaycheckReserve),
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Text(
+                            text = "Stash every pay",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                        )
+                    }
+                }
+
+                // Safe to spend
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (breakdown.isSurplus) ColorIncome.copy(alpha = 0.15f) else ColorExpense.copy(alpha = 0.15f),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = if (breakdown.isSurplus) "Safe-to-Spend" else "Cushion Deficit",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (breakdown.isSurplus) ColorIncome else ColorExpense
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = currencyFormat.format(if (breakdown.isSurplus) breakdown.perPaycheckSafeToSpend else breakdown.deficitAmount),
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = if (breakdown.isSurplus) ColorIncome else ColorExpense
+                        )
+                        Text(
+                            text = if (breakdown.isSurplus) "${currencyFormat.format(breakdown.dailySafeToSpend)}/day" else "Bills exceed pay",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (breakdown.isSurplus) ColorIncome.copy(alpha = 0.85f) else ColorExpense.copy(alpha = 0.85f)
+                        )
+                    }
+                }
+            }
+
+            // 3-Paycheck Bonus Months Callout (for bi-weekly schedules)
+            if (breakdown.threePaycheckMonths.isNotEmpty()) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CalendarMonth,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "3-Paycheck Bonus Months: ${breakdown.threePaycheckMonths.joinToString(", ")} (3rd pay is 100% surplus!)",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                    }
+                }
+            }
+
+            // Upcoming bills preview
+            if (breakdown.upcomingBillsInPeriod.isNotEmpty()) {
+                Text(
+                    text = "Bills due this pay window (${breakdown.upcomingBillsInPeriod.size}):",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    breakdown.upcomingBillsInPeriod.take(3).forEach { bill ->
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            Text(
+                                text = "${bill.name} (${currencyFormat.format(bill.amount)})",
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                    if (breakdown.upcomingBillsInPeriod.size > 3) {
+                        Text(
+                            text = "+${breakdown.upcomingBillsInPeriod.size - 3} more",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.align(Alignment.CenterVertically)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bill Card Item
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun BillCardItem(
+    bill: Bill,
+    currencyFormat: NumberFormat,
+    onTogglePaid: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (bill.isPaidThisMonth) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (bill.isPaidThisMonth) 0.dp else 2.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Checkbox to mark paid
+            IconButton(onClick = onTogglePaid) {
+                Icon(
+                    imageVector = if (bill.isPaidThisMonth) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                    contentDescription = if (bill.isPaidThisMonth) "Mark Unpaid" else "Mark Paid",
+                    tint = if (bill.isPaidThisMonth) ColorIncome else MaterialTheme.colorScheme.outline
+                )
+            }
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = bill.name,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            textDecoration = if (bill.isPaidThisMonth) TextDecoration.LineThrough else TextDecoration.None
+                        ),
+                        color = if (bill.isPaidThisMonth) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface
+                    )
+                    if (bill.isAutoPay) {
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                        ) {
+                            Text(
+                                text = "Auto",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant
+                    ) {
+                        Text(
+                            text = "Due Day ${bill.dueDayOfMonth}",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+
+                    Text(
+                        text = bill.category,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = currencyFormat.format(bill.amount),
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = if (bill.isPaidThisMonth) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface
+                    )
+                )
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Delete Bill",
+                        tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Debt Card Item
+// ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
 fun DebtCardItem(
@@ -224,7 +638,7 @@ fun DebtCardItem(
                 )
             }
 
-            Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -260,6 +674,205 @@ fun DebtCardItem(
             }
         }
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Empty State Cards
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun EmptyBillsCard(onAddBill: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                Icons.Default.Receipt,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.size(56.dp)
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "No recurring bills added yet",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Add Rent, Utilities, Car Insurance, Wi-Fi, or Subscriptions to calculate your equalized paycheck cushion.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(onClick = onAddBill) {
+                Text("Add Your First Bill")
+            }
+        }
+    }
+}
+
+@Composable
+fun EmptyDebtsCard(onAddDebt: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                Icons.Default.CreditCard,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.size(56.dp)
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "No debts added yet",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Add credit cards, auto loans, mortgages, or student loans to project payoff timelines and test extra principal payments.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(onClick = onAddDebt) {
+                Text("Add Your First Debt")
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dialogs
+// ─────────────────────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AddBillDialog(
+    onDismiss: () -> Unit,
+    onAddBill: (name: String, amount: Double, dueDay: Int, category: String, isAutoPay: Boolean, notes: String?) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var amountText by remember { mutableStateOf("") }
+    var dueDayText by remember { mutableStateOf("") }
+    var selectedCategory by remember { mutableStateOf("Housing") }
+    var isAutoPay by remember { mutableStateOf(false) }
+
+    val categories = listOf("Housing", "Utilities", "Insurance", "Phone/Internet", "Subscriptions", "Other")
+
+    val dueDayInt = dueDayText.toIntOrNull() ?: 1
+    val isValid = name.isNotBlank() &&
+            (amountText.toDoubleOrNull() ?: 0.0) > 0.0 &&
+            dueDayInt in 1..31
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Recurring Bill") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Bill Name") },
+                    placeholder = { Text("e.g. Rent, Duke Energy, Geico") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = amountText,
+                        onValueChange = { amountText = it },
+                        label = { Text("Amount ($)") },
+                        placeholder = { Text("1200.00") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    OutlinedTextField(
+                        value = dueDayText,
+                        onValueChange = { dueDayText = it },
+                        label = { Text("Due Day (1-31)") },
+                        placeholder = { Text("1") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Text(text = "Category", style = MaterialTheme.typography.labelMedium)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    categories.take(3).forEach { cat ->
+                        FilterChip(
+                            selected = selectedCategory == cat,
+                            onClick = { selectedCategory = cat },
+                            label = { Text(cat, style = MaterialTheme.typography.labelSmall) }
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    categories.drop(3).forEach { cat ->
+                        FilterChip(
+                            selected = selectedCategory == cat,
+                            onClick = { selectedCategory = cat },
+                            label = { Text(cat, style = MaterialTheme.typography.labelSmall) }
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Auto-Pay Enabled", style = MaterialTheme.typography.bodyMedium)
+                    Switch(checked = isAutoPay, onCheckedChange = { isAutoPay = it })
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val amount = amountText.toDoubleOrNull() ?: return@Button
+                    onAddBill(name, amount, dueDayInt, selectedCategory, isAutoPay, null)
+                },
+                enabled = isValid
+            ) {
+                Text("Add Bill")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -325,10 +938,7 @@ fun AddDebtDialog(
                     )
                 }
 
-                Text(
-                    text = "Type",
-                    style = MaterialTheme.typography.labelMedium
-                )
+                Text(text = "Type", style = MaterialTheme.typography.labelMedium)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -357,9 +967,74 @@ fun AddDebtDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EditPaycheckDialog(
+    currentConfig: PaycheckConfig,
+    onDismiss: () -> Unit,
+    onSave: (PaycheckConfig) -> Unit
+) {
+    var selectedFreq by remember { mutableStateOf(currentConfig.frequency) }
+    var takeHomeText by remember { mutableStateOf(currentConfig.typicalTakeHomePay.toString()) }
+
+    val isValid = (takeHomeText.toDoubleOrNull() ?: 0.0) > 0.0
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Configure Paycheck Cushion") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text(
+                    text = "FinanceHome calculates the exact amount to set aside from each paycheck to equalize bill payments year-round.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Text(text = "Pay Frequency", style = MaterialTheme.typography.labelMedium)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    PayFrequency.values().forEach { freq ->
+                        FilterChip(
+                            selected = selectedFreq == freq,
+                            onClick = { selectedFreq = freq },
+                            label = { Text(freq.displayName) },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = takeHomeText,
+                    onValueChange = { takeHomeText = it },
+                    label = { Text("Typical Take-Home Pay ($)") },
+                    placeholder = { Text("1800.00") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val pay = takeHomeText.toDoubleOrNull() ?: return@Button
+                    onSave(
+                        currentConfig.copy(
+                            frequency = selectedFreq,
+                            typicalTakeHomePay = pay
+                        )
+                    )
+                },
+                enabled = isValid
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
 }

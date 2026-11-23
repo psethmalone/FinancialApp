@@ -3,6 +3,7 @@ package com.example.financehome.di
 import android.content.Context
 import androidx.room.Room
 import com.example.financehome.data.local.AppDatabase
+import com.example.financehome.data.local.BillDao
 import com.example.financehome.data.local.CategoryRuleDao
 import com.example.financehome.data.local.DebtDao
 import com.example.financehome.data.local.MarketPriceDao
@@ -35,4 +36,7 @@ object DatabaseModule {
 
     @Provides
     fun provideCategoryRuleDao(db: AppDatabase): CategoryRuleDao = db.categoryRuleDao()
+
+    @Provides
+    fun provideBillDao(db: AppDatabase): BillDao = db.billDao()
 }

@@ -5,6 +5,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import com.example.financehome.data.model.Bill
 import com.example.financehome.data.model.CategoryRule
 import com.example.financehome.data.model.Debt
 import com.example.financehome.data.model.MarketPrice
@@ -15,9 +16,10 @@ import com.example.financehome.data.model.Transaction
         Transaction::class,
         Debt::class,
         MarketPrice::class,
-        CategoryRule::class
+        CategoryRule::class,
+        Bill::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -27,6 +29,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun debtDao(): DebtDao
     abstract fun marketPriceDao(): MarketPriceDao
     abstract fun categoryRuleDao(): CategoryRuleDao
+    abstract fun billDao(): BillDao
 
     companion object {
         const val DATABASE_NAME = "financehome.db"
