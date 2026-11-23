@@ -59,6 +59,16 @@ class AppUpdateRepository @Inject constructor(
         return prefs.getLong(KEY_LAST_CHECK_TIME, 0L)
     }
 
+    fun cleanGithubRepo(input: String): String {
+        return input.trim()
+            .removePrefix("https://")
+            .removePrefix("http://")
+            .removePrefix("github.com/")
+            .removePrefix("www.github.com/")
+            .removeSuffix(".git")
+            .trim('/')
+    }
+
     /**
      * Checks remote source (GitHub Releases or JSON manifest) for a newer app version.
      */
@@ -68,10 +78,11 @@ class AppUpdateRepository @Inject constructor(
                 val source = (repoOrUrlOverride ?: getUpdateRepo()).trim()
                 prefs.edit().putLong(KEY_LAST_CHECK_TIME, System.currentTimeMillis()).apply()
 
-                if (source.startsWith("http://") || source.startsWith("https://")) {
-                    checkCustomUrl(source)
+                val isGithub = source.contains("github.com", ignoreCase = true) || !source.startsWith("http")
+                if (isGithub) {
+                    checkGithubRelease(cleanGithubRepo(source))
                 } else {
-                    checkGithubRelease(source)
+                    checkCustomUrl(source)
                 }
             } catch (e: Exception) {
                 Result.failure(e)
@@ -79,7 +90,7 @@ class AppUpdateRepository @Inject constructor(
         }
 
     private fun checkGithubRelease(repo: String): Result<AppUpdateInfo?> {
-        val cleanRepo = repo.removePrefix("https://github.com/").trim('/')
+        val cleanRepo = cleanGithubRepo(repo)
         val url = "https://api.github.com/repos/$cleanRepo/releases/latest"
 
         val request = Request.Builder()
@@ -161,7 +172,8 @@ class AppUpdateRepository @Inject constructor(
     fun downloadApk(downloadUrl: String): Flow<DownloadState> = flow {
         emit(DownloadState.Idle)
         try {
-            val updatesDir = File(context.cacheDir, "updates").apply { mkdirs() }
+            val baseDir = context.externalCacheDir ?: context.cacheDir
+            val updatesDir = File(baseDir, "updates").apply { mkdirs() }
             val destFile = File(updatesDir, "app-update.apk")
             if (destFile.exists()) {
                 destFile.delete()
@@ -224,12 +236,14 @@ class AppUpdateRepository @Inject constructor(
     }.flowOn(Dispatchers.IO)
 
     fun getCachedApk(): File? {
-        val file = File(context.cacheDir, "updates/app-update.apk")
+        val baseDir = context.externalCacheDir ?: context.cacheDir
+        val file = File(baseDir, "updates/app-update.apk")
         return if (file.exists() && file.length() > 0) file else null
     }
 
     fun clearCachedApk() {
-        val file = File(context.cacheDir, "updates/app-update.apk")
+        val baseDir = context.externalCacheDir ?: context.cacheDir
+        val file = File(baseDir, "updates/app-update.apk")
         if (file.exists()) {
             file.delete()
         }
