@@ -1,4 +1,4 @@
-﻿package com.example.financehome.data.remote
+package com.example.financehome.data.remote
 
 import retrofit2.http.GET
 import retrofit2.http.Path
@@ -31,5 +31,15 @@ interface YahooFinanceApi {
         @Query("interval") interval: String = "1d",
         @Query("period1") periodStart: Long,
         @Query("period2") periodEnd: Long,
+    ): YahooFinanceResponse
+
+    /**
+     * Fetches recent chart & live price metadata for [symbol] using a range query.
+     */
+    @GET("v8/finance/chart/{symbol}")
+    suspend fun getChart(
+        @Path("symbol") symbol: String,
+        @Query("range") range: String = "5d",
+        @Query("interval") interval: String = "1d",
     ): YahooFinanceResponse
 }

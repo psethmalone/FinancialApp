@@ -25,21 +25,64 @@ import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
 
+import com.example.financehome.data.repository.NotificationLogRepository
+import com.example.financehome.service.NotificationParser
+
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val transactionRepo: TransactionRepository,
-    private val appUpdateRepo: AppUpdateRepository
+    private val appUpdateRepo: AppUpdateRepository,
+    private val notificationLogRepo: NotificationLogRepository
 ) : ViewModel() {
 
     val isCloudSyncEnabled = MutableStateFlow(false)
     val hasNotificationPermission = MutableStateFlow(false)
     val exportState = MutableStateFlow<String?>(null)
 
+    val notificationLogs = notificationLogRepo.logs
+    val simulationFeedback = MutableStateFlow<String?>(null)
+
     val updateCheckResult = MutableStateFlow<UpdateCheckResult>(UpdateCheckResult.Idle)
     val downloadState = MutableStateFlow<DownloadState>(DownloadState.Idle)
     val updateRepo = MutableStateFlow(appUpdateRepo.getUpdateRepo())
     val isAutoCheckUpdatesEnabled = MutableStateFlow(appUpdateRepo.isAutoCheckEnabled())
     val showUpdateDialog = MutableStateFlow(false)
+
+    fun simulateCashApp(context: Context) {
+        viewModelScope.launch {
+            val res = notificationLogRepo.simulateNotification(
+                context,
+                NotificationParser.PACKAGE_CASH_APP,
+                "Cash App",
+                "You paid $12.50 to McDonald's"
+            )
+            simulationFeedback.value = if (res != null) "✓ Simulated Cash App: \$12.50 to McDonald's captured!" else "Simulation failed"
+        }
+    }
+
+    fun simulateAllyBank(context: Context) {
+        viewModelScope.launch {
+            val res = notificationLogRepo.simulateNotification(
+                context,
+                NotificationParser.PACKAGE_ALLY_BANK,
+                "Ally Bank Debit Card",
+                "A $45.00 transaction was made using your Ally Bank Debit Card at WALMART"
+            )
+            simulationFeedback.value = if (res != null) "✓ Simulated Ally Bank: \$45.00 at WALMART captured!" else "Simulation failed"
+        }
+    }
+
+    fun simulateCustom(context: Context, text: String) {
+        viewModelScope.launch {
+            val res = notificationLogRepo.simulateNotification(
+                context,
+                "com.generic.bank",
+                "Bank Alert",
+                text
+            )
+            simulationFeedback.value = if (res != null) "✓ Captured: ${res.merchant} \$${res.amount}!" else "❌ Could not parse transaction from this text"
+        }
+    }
 
     fun checkForUpdates() {
         viewModelScope.launch {

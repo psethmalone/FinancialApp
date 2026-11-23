@@ -9,11 +9,7 @@ import com.example.financehome.data.repository.TransactionRepository
 import com.example.financehome.domain.InvestmentProjector
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
@@ -24,7 +20,7 @@ import javax.inject.Inject
 
 data class PhantomInvestmentItem(
     val transaction: Transaction,
-    val ticker: String = "SPY",
+    val ticker: String,
     val buyPrice: Double?,
     val currentPrice: Double?,
     val phantomValue: Double?,
@@ -38,17 +34,41 @@ data class ProjectionCardData(
     val dcaMonthlyValue: Double
 )
 
+data class AssetOption(
+    val ticker: String,
+    val name: String,
+    val assetType: String // "Index Fund", "Tech Stock", etc.
+)
+
 @HiltViewModel
 class OpportunityViewModel @Inject constructor(
     private val transactionRepo: TransactionRepository,
     private val marketDataRepo: MarketDataRepository
 ) : ViewModel() {
 
+    // Preset list of popular index funds and stocks
+    val defaultAssets = listOf(
+        AssetOption("SPY", "SPDR S&P 500 ETF", "Index Fund"),
+        AssetOption("VOO", "Vanguard S&P 500", "Index Fund"),
+        AssetOption("QQQ", "Invesco Nasdaq 100", "Tech ETF"),
+        AssetOption("VTI", "Vanguard Total Stock Market", "Index Fund"),
+        AssetOption("SCHD", "Schwab US Dividend Equity", "Dividend ETF"),
+        AssetOption("AAPL", "Apple Inc.", "Stock"),
+        AssetOption("NVDA", "NVIDIA Corporation", "Stock"),
+        AssetOption("MSFT", "Microsoft Corporation", "Stock"),
+        AssetOption("TSLA", "Tesla Inc.", "Stock")
+    )
+
+    val availableAssets = MutableStateFlow(defaultAssets)
+
+    // Currently selected ticker for the fake portfolio
+    val selectedTicker = MutableStateFlow("SPY")
+
     // Configurable assumed rate of return (default 7.0%)
     val assumedAnnualReturn = MutableStateFlow(0.07)
 
-    // Ticker symbol for tracking (defaults to S&P 500 ETF 'SPY')
-    val trackerTicker = MutableStateFlow("SPY")
+    // Interactive monthly contribution for projection tab (defaults to $100 or actual spend)
+    val simulatedMonthlyContribution = MutableStateFlow(100.0)
 
     val isRefreshingPrices = MutableStateFlow(false)
 
@@ -56,7 +76,7 @@ class OpportunityViewModel @Inject constructor(
     val phantomItems = MutableStateFlow<List<PhantomInvestmentItem>>(emptyList())
 
     // All discretionary transactions from DB
-    private val discretionaryTransactions: StateFlow<List<Transaction>> =
+    val discretionaryTransactions: StateFlow<List<Transaction>> =
         transactionRepo.getDiscretionaryTransactions()
             .stateIn(
                 scope = viewModelScope,
@@ -64,17 +84,17 @@ class OpportunityViewModel @Inject constructor(
                 initialValue = emptyList()
             )
 
-    // Total discretionary spending this month
+    // Actual discretionary spending this month
     val thisMonthDiscretionarySpend = MutableStateFlow(0.0)
 
-    // 10, 20, 30 year projections based on monthly discretionary spend
+    // Projections based on simulatedMonthlyContribution & assumedAnnualReturn
     val projections: StateFlow<List<ProjectionCardData>> =
-        combine(thisMonthDiscretionarySpend, assumedAnnualReturn) { spend, rate ->
-            listOf(10, 20, 30).map { yrs ->
+        combine(simulatedMonthlyContribution, assumedAnnualReturn) { monthly, rate ->
+            listOf(5, 10, 20, 30).map { yrs ->
                 ProjectionCardData(
                     years = yrs,
-                    lumpSumValue = InvestmentProjector.futureValue(spend, rate, yrs),
-                    dcaMonthlyValue = InvestmentProjector.dcaFutureValue(spend, rate, yrs)
+                    lumpSumValue = InvestmentProjector.futureValue(monthly * 12, rate, yrs),
+                    dcaMonthlyValue = InvestmentProjector.dcaFutureValue(monthly, rate, yrs)
                 )
             }
         }.stateIn(
@@ -84,8 +104,8 @@ class OpportunityViewModel @Inject constructor(
         )
 
     val totalSpentOnDiscretionary: StateFlow<Double> =
-        combine(phantomItems) { items ->
-            items.first().sumOf { it.transaction.amount }
+        phantomItems.map { items ->
+            items.sumOf { it.transaction.amount }
         }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -93,8 +113,8 @@ class OpportunityViewModel @Inject constructor(
         )
 
     val totalPhantomValue: StateFlow<Double> =
-        combine(phantomItems) { items ->
-            items.first().sumOf { it.phantomValue ?: it.transaction.amount }
+        phantomItems.map { items ->
+            items.sumOf { it.phantomValue ?: it.transaction.amount }
         }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -111,7 +131,6 @@ class OpportunityViewModel @Inject constructor(
         )
 
     init {
-        // Observe transactions and recompute prices
         viewModelScope.launch {
             discretionaryTransactions.collect { transactions ->
                 computeMonthlySpend(transactions)
@@ -120,8 +139,37 @@ class OpportunityViewModel @Inject constructor(
         }
     }
 
+    fun selectTicker(ticker: String) {
+        val clean = ticker.uppercase().trim()
+        selectedTicker.value = clean
+        viewModelScope.launch {
+            refreshPhantomPortfolio(discretionaryTransactions.value)
+        }
+    }
+
+    fun addCustomTicker(ticker: String, name: String = ticker) {
+        val clean = ticker.uppercase().trim()
+        if (clean.isNotBlank()) {
+            val exists = availableAssets.value.any { it.ticker.equals(clean, ignoreCase = true) }
+            if (!exists) {
+                availableAssets.value = availableAssets.value + AssetOption(clean, name, "Custom")
+            }
+            selectTicker(clean)
+        }
+    }
+
     fun setAssumedReturn(rate: Double) {
         assumedAnnualReturn.value = rate
+    }
+
+    fun setSimulatedMonthlyContribution(amount: Double) {
+        simulatedMonthlyContribution.value = amount.coerceAtLeast(10.0)
+    }
+
+    fun useActualSpendForProjection() {
+        if (thisMonthDiscretionarySpend.value > 0.0) {
+            simulatedMonthlyContribution.value = thisMonthDiscretionarySpend.value
+        }
     }
 
     private fun computeMonthlySpend(transactions: List<Transaction>) {
@@ -133,7 +181,11 @@ class OpportunityViewModel @Inject constructor(
                         dt.year == now.year && dt.monthValue == now.monthValue
                     }
         }
-        thisMonthDiscretionarySpend.value = thisMonthDebitTransactions.sumOf { it.amount }
+        val actualMonthly = thisMonthDebitTransactions.sumOf { it.amount }
+        thisMonthDiscretionarySpend.value = actualMonthly
+        if (actualMonthly > 0.0 && simulatedMonthlyContribution.value == 100.0) {
+            simulatedMonthlyContribution.value = actualMonthly
+        }
     }
 
     fun refreshPrices() {
@@ -150,7 +202,7 @@ class OpportunityViewModel @Inject constructor(
         }
 
         isRefreshingPrices.value = true
-        val ticker = trackerTicker.value
+        val ticker = selectedTicker.value
 
         withContext(Dispatchers.IO) {
             val currentPrice = marketDataRepo.getCurrentPrice(ticker)

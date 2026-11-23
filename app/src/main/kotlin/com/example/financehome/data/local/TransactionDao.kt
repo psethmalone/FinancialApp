@@ -90,4 +90,7 @@ interface TransactionDao {
 
     @Query("UPDATE transactions SET isSynced = 1 WHERE id = :id")
     suspend fun markSynced(id: String)
+
+    @Query("UPDATE transactions SET category = :category, isDiscretionary = :isDiscretionary, notes = :notes WHERE LOWER(merchant) = LOWER(:merchant)")
+    suspend fun updateCategoryForMerchant(merchant: String, category: String, isDiscretionary: Boolean, notes: String?): Int
 }

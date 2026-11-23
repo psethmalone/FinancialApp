@@ -3,6 +3,7 @@ package com.example.financehome.ui.settings
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -16,6 +17,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -47,9 +49,15 @@ fun SettingsScreen(
     val isAutoCheckUpdatesEnabled by viewModel.isAutoCheckUpdatesEnabled.collectAsState()
     val showUpdateDialog by viewModel.showUpdateDialog.collectAsState()
 
+    val notificationLogs by viewModel.notificationLogs.collectAsState()
+    val simulationFeedback by viewModel.simulationFeedback.collectAsState()
+
     var showCloudSyncDialog by remember { mutableStateOf(false) }
     var showEditRepoDialog by remember { mutableStateOf(false) }
+    var showCustomSimulatorDialog by remember { mutableStateOf(false) }
     var editingRepoText by remember { mutableStateOf("") }
+    var customSimulatorText by remember { mutableStateOf("") }
+    var showLogsExpanded by remember { mutableStateOf(false) }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -122,6 +130,19 @@ fun SettingsScreen(
                         )
 
                         if (!hasNotificationPermission) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "💡 Android 13/14+ Tip: If the Notification Access toggle is grayed out in phone settings: Go to phone Settings > Apps > FinanceHome > tap the 3 vertical dots (⋮) in the top-right corner > tap 'Allow restricted settings'. Then return here to enable access.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(10.dp)
+                                )
+                            }
+
                             Button(
                                 onClick = {
                                     val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
@@ -133,6 +154,148 @@ fun SettingsScreen(
                                 Icon(Icons.Default.NotificationsActive, contentDescription = null)
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("Grant Notification Access")
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Test Transaction Simulator & Diagnostic Logs Card
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Test Transaction Capture",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                            Icon(
+                                imageVector = Icons.Default.Science,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        Text(
+                            text = "Tap to simulate incoming bank notifications to immediately verify parser, auto-categorizer, and swipe queue without waiting for a bank purchase.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        if (simulationFeedback != null) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = simulationFeedback ?: "",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.padding(10.dp)
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = { viewModel.simulateCashApp(context) },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                            ) {
+                                Text("Cash App ($12.50)", fontSize = 12.sp)
+                            }
+
+                            Button(
+                                onClick = { viewModel.simulateAllyBank(context) },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                            ) {
+                                Text("Ally Bank ($45)", fontSize = 12.sp)
+                            }
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                customSimulatorText = ""
+                                showCustomSimulatorDialog = true
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Test Custom Notification Text...")
+                        }
+
+                        // Recent Logs toggle
+                        if (notificationLogs.isNotEmpty()) {
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { showLogsExpanded = !showLogsExpanded },
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Recent Notifications (${notificationLogs.size})",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                                )
+                                Icon(
+                                    imageVector = if (showLogsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    contentDescription = null
+                                )
+                            }
+
+                            if (showLogsExpanded) {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    notificationLogs.take(5).forEach { log ->
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = MaterialTheme.colorScheme.surface,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Column(modifier = Modifier.padding(8.dp)) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween
+                                                ) {
+                                                    Text(
+                                                        text = log.packageName.substringAfterLast('.'),
+                                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                    Text(
+                                                        text = log.status,
+                                                        style = MaterialTheme.typography.labelSmall.copy(
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = if (log.isSuccess) ColorIncome else ColorExpense
+                                                        )
+                                                    )
+                                                }
+                                                Text(
+                                                    text = log.summaryText,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    maxLines = 2
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -575,6 +738,45 @@ fun SettingsScreen(
             dismissButton = {
                 TextButton(onClick = { showCloudSyncDialog = false }) {
                     Text("Keep Local Only")
+                }
+            }
+        )
+    }
+
+    if (showCustomSimulatorDialog) {
+        AlertDialog(
+            onDismissRequest = { showCustomSimulatorDialog = false },
+            title = { Text("Simulate Bank Notification") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Paste or type any bank notification text to test:",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    OutlinedTextField(
+                        value = customSimulatorText,
+                        onValueChange = { customSimulatorText = it },
+                        label = { Text("Notification text") },
+                        placeholder = { Text("e.g. Card charged $24.99 at Target") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (customSimulatorText.isNotBlank()) {
+                            viewModel.simulateCustom(context, customSimulatorText)
+                        }
+                        showCustomSimulatorDialog = false
+                    }
+                ) {
+                    Text("Simulate")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomSimulatorDialog = false }) {
+                    Text("Cancel")
                 }
             }
         )

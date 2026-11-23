@@ -69,4 +69,18 @@ class TransactionRepository @Inject constructor(
         val userRules = categoryRuleDao.getAllRulesList()
         return AutoCategorizer.categorize(merchant, userRules)
     }
+
+    suspend fun batchCategorizeByMerchant(
+        merchant: String,
+        category: String,
+        isDiscretionary: Boolean,
+        notes: String?
+    ): Int {
+        return transactionDao.updateCategoryForMerchant(
+            merchant = merchant.trim(),
+            category = category,
+            isDiscretionary = isDiscretionary,
+            notes = notes
+        )
+    }
 }

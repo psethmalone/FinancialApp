@@ -11,11 +11,25 @@ class NotificationParserTest {
     private val parser = NotificationParser()
 
     @Test
-    fun testCashApp_youPaidMerchant() {
+    fun testCashApp_youPaidToMerchant() {
         val result = parser.parse(
             packageName = "com.squareup.cash",
             title = "Cash App",
             text = "You paid $12.50 to McDonald's"
+        )
+
+        assertNotNull(result)
+        assertEquals(12.50, result!!.amount, 0.001)
+        assertEquals("McDonald's", result.merchant)
+        assertEquals(TransactionType.DEBIT, result.type)
+    }
+
+    @Test
+    fun testCashApp_youPaidMerchantDirect() {
+        val result = parser.parse(
+            packageName = "com.squareup.cash",
+            title = "Cash App",
+            text = "You paid McDonald's $12.50"
         )
 
         assertNotNull(result)
@@ -39,6 +53,34 @@ class NotificationParserTest {
     }
 
     @Test
+    fun testCashApp_approvedAt() {
+        val result = parser.parse(
+            packageName = "com.squareup.cash",
+            title = "Cash App",
+            text = "Approved: $8.50 at Chipotle"
+        )
+
+        assertNotNull(result)
+        assertEquals(8.50, result!!.amount, 0.001)
+        assertEquals("Chipotle", result.merchant)
+        assertEquals(TransactionType.DEBIT, result.type)
+    }
+
+    @Test
+    fun testCashApp_spentWithCashCard() {
+        val result = parser.parse(
+            packageName = "com.squareup.cash",
+            title = "Cash Card",
+            text = "You spent $32.00 with your Cash Card at Kroger"
+        )
+
+        assertNotNull(result)
+        assertEquals(32.00, result!!.amount, 0.001)
+        assertEquals("Kroger", result.merchant)
+        assertEquals(TransactionType.DEBIT, result.type)
+    }
+
+    @Test
     fun testCashApp_receivedMoney() {
         val result = parser.parse(
             packageName = "com.squareup.cash",
@@ -53,6 +95,35 @@ class NotificationParserTest {
     }
 
     @Test
+    fun testCashApp_senderSentYou() {
+        val result = parser.parse(
+            packageName = "com.squareup.cash",
+            title = "Cash App",
+            text = "Alex sent you $25.00"
+        )
+
+        assertNotNull(result)
+        assertEquals(25.00, result!!.amount, 0.001)
+        assertEquals("Alex", result.merchant)
+        assertEquals(TransactionType.CREDIT, result.type)
+    }
+
+    @Test
+    fun testCashApp_bigTextExtraction() {
+        val result = parser.parse(
+            packageName = "com.squareup.cash",
+            title = "Cash App",
+            text = null,
+            bigText = "You paid $14.20 to Wendy's"
+        )
+
+        assertNotNull(result)
+        assertEquals(14.20, result!!.amount, 0.001)
+        assertEquals("Wendy's", result.merchant)
+        assertEquals(TransactionType.DEBIT, result.type)
+    }
+
+    @Test
     fun testAlly_debitCardTransaction() {
         val result = parser.parse(
             packageName = "com.ally.mobile",
@@ -63,6 +134,20 @@ class NotificationParserTest {
         assertNotNull(result)
         assertEquals(45.00, result!!.amount, 0.001)
         assertEquals("WALMART", result.merchant)
+        assertEquals(TransactionType.DEBIT, result.type)
+    }
+
+    @Test
+    fun testAlly_debitPurchaseAt() {
+        val result = parser.parse(
+            packageName = "com.ally.mobile",
+            title = "Card Alert",
+            text = "Debit card purchase of $55.00 at Costco"
+        )
+
+        assertNotNull(result)
+        assertEquals(55.00, result!!.amount, 0.001)
+        assertEquals("Costco", result.merchant)
         assertEquals(TransactionType.DEBIT, result.type)
     }
 

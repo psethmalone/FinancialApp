@@ -5,14 +5,21 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,6 +43,26 @@ import java.text.NumberFormat
 import java.util.Locale
 import kotlin.math.roundToInt
 
+data class CategoryOption(
+    val name: String,
+    val icon: String,
+    val defaultIsDiscretionary: Boolean,
+    val isRent: Boolean = false
+)
+
+val CATEGORY_OPTIONS = listOf(
+    CategoryOption("Groceries", "🛒", defaultIsDiscretionary = false),
+    CategoryOption("Food & Dining", "🍔", defaultIsDiscretionary = true),
+    CategoryOption("Coffee & Drinks", "☕", defaultIsDiscretionary = true),
+    CategoryOption("Rent / Housing", "🏠", defaultIsDiscretionary = false, isRent = true),
+    CategoryOption("Utilities & Bills", "💡", defaultIsDiscretionary = false),
+    CategoryOption("Gas & Transit", "🚗", defaultIsDiscretionary = false),
+    CategoryOption("Entertainment", "🎬", defaultIsDiscretionary = true),
+    CategoryOption("Shopping", "🛍️", defaultIsDiscretionary = true),
+    CategoryOption("Health & Care", "💊", defaultIsDiscretionary = false),
+    CategoryOption("Personal & Other", "📦", defaultIsDiscretionary = true)
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SwipeCategorizeScreen(
@@ -44,12 +71,24 @@ fun SwipeCategorizeScreen(
     modifier: Modifier = Modifier
 ) {
     val uncategorized by viewModel.uncategorizedTransactions.collectAsState()
+    val batchMessage by viewModel.batchMessage.collectAsState()
     val currencyFormat = NumberFormat.getCurrencyInstance(Locale.US)
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Categorize Spending", fontWeight = FontWeight.Bold) },
+                title = {
+                    Column {
+                        Text("Categorize Spending", fontWeight = FontWeight.Bold)
+                        if (uncategorized.isNotEmpty()) {
+                            Text(
+                                "${uncategorized.size} transactions to classify",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onDone) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -63,26 +102,62 @@ fun SwipeCategorizeScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(16.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             contentAlignment = Alignment.Center
         ) {
+            // Batch notification toast
+            AnimatedVisibility(
+                visible = batchMessage != null,
+                enter = slideInVertically() + fadeIn(),
+                exit = slideOutVertically() + fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 8.dp)
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = RoundedCornerShape(20.dp),
+                    shadowElevation = 4.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Filled.Check,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = batchMessage ?: "",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+            }
+
             if (uncategorized.isEmpty()) {
                 AllCaughtUpView(onDone = onDone)
             } else {
                 val currentTransaction = uncategorized.first()
-                val totalCount = uncategorized.size
+                val sameMerchantCount = uncategorized.count {
+                    it.merchant.equals(currentTransaction.merchant, ignoreCase = true)
+                }
 
-                SwipeCardDeck(
+                CategoryFirstSwipeCard(
                     transaction = currentTransaction,
-                    remainingCount = totalCount,
+                    sameMerchantCount = sameMerchantCount,
                     currencyFormat = currencyFormat,
-                    onCategorized = { category, isDiscretionary, isRent, remember ->
+                    onClassified = { category, isDiscretionary, isRent ->
                         viewModel.categorizeTransaction(
                             transaction = currentTransaction,
                             category = category,
                             isDiscretionary = isDiscretionary,
                             isRecurringRent = isRent,
-                            rememberRule = remember
+                            rememberRule = true
                         )
                     }
                 )
@@ -91,349 +166,268 @@ fun SwipeCategorizeScreen(
     }
 }
 
-enum class SwipeStage {
-    NEEDS_VS_WANTS,
-    SUB_CATEGORY
-}
-
 @Composable
-fun SwipeCardDeck(
+fun CategoryFirstSwipeCard(
     transaction: Transaction,
-    remainingCount: Int,
+    sameMerchantCount: Int,
     currencyFormat: NumberFormat,
-    onCategorized: (category: String, isDiscretionary: Boolean, isRecurringRent: Boolean, rememberRule: Boolean) -> Unit
+    onClassified: (category: String, isDiscretionary: Boolean, isRent: Boolean) -> Unit
 ) {
-    var stage by remember(transaction.id) { mutableStateOf(SwipeStage.NEEDS_VS_WANTS) }
-    var selectedIsDiscretionary by remember(transaction.id) { mutableStateOf(false) }
-    var rememberRule by remember(transaction.id) { mutableStateOf(true) }
+    // Default selected category
+    var selectedCategory by remember(transaction.id) {
+        mutableStateOf(CATEGORY_OPTIONS.first { it.name == "Food & Dining" })
+    }
 
-    val offsetX = remember { Animatable(0f) }
     val coroutineScope = rememberCoroutineScope()
+    val offsetX = remember(transaction.id) { Animatable(0f) }
+    val dragLimit = 400f
+
+    // When card is dragged
+    val dragProgress = (offsetX.value / dragLimit).coerceIn(-1f, 1f)
+    val cardColor = when {
+        dragProgress > 0.15f -> ColorIncome.copy(alpha = 0.12f * (dragProgress / 1f))
+        dragProgress < -0.15f -> ColorExpense.copy(alpha = 0.12f * (-dragProgress / 1f))
+        else -> MaterialTheme.colorScheme.surface
+    }
+
+    fun triggerCommit(isNeed: Boolean) {
+        coroutineScope.launch {
+            val targetX = if (isNeed) 1200f else -1200f
+            offsetX.animateTo(targetX, animationSpec = tween(250))
+            onClassified(
+                selectedCategory.name,
+                !isNeed, // if Need -> isDiscretionary = false; if Want -> isDiscretionary = true
+                selectedCategory.isRent
+            )
+        }
+    }
 
     Column(
         modifier = Modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceBetween
+        verticalArrangement = Arrangement.SpaceBetween,
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Counter Header
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "$remainingCount remaining to review",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.SemiBold
-            )
-            AssistChip(
-                onClick = {},
-                label = { Text(if (stage == SwipeStage.NEEDS_VS_WANTS) "Step 1: Need vs Want" else "Step 2: Sub-category") }
-            )
-        }
+        // Top instruction
+        Text(
+            text = "1. Click a category  →  2. Swipe or tap Need / Want",
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(top = 4.dp)
+        )
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Main Swipeable Card
+        // The interactive card
         Card(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
+                .padding(vertical = 8.dp)
                 .offset { IntOffset(offsetX.value.roundToInt(), 0) }
                 .graphicsLayer {
-                    rotationZ = (offsetX.value / 40f).coerceIn(-15f, 15f)
+                    rotationZ = (offsetX.value / dragLimit) * 10f
                 }
-                .pointerInput(transaction.id, stage) {
-                    if (stage == SwipeStage.NEEDS_VS_WANTS) {
-                        detectDragGestures(
-                            onDragEnd = {
-                                if (offsetX.value < -250f) {
-                                    // Swiped Left: WANT
-                                    selectedIsDiscretionary = true
-                                    stage = SwipeStage.SUB_CATEGORY
-                                    coroutineScope.launch { offsetX.snapTo(0f) }
-                                } else if (offsetX.value > 250f) {
-                                    // Swiped Right: NEED
-                                    selectedIsDiscretionary = false
-                                    stage = SwipeStage.SUB_CATEGORY
-                                    coroutineScope.launch { offsetX.snapTo(0f) }
-                                } else {
-                                    coroutineScope.launch {
-                                        offsetX.animateTo(0f, animationSpec = tween(200))
-                                    }
-                                }
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
+                .pointerInput(transaction.id) {
+                    detectDragGestures(
+                        onDragEnd = {
+                            if (offsetX.value > 180f) {
+                                triggerCommit(isNeed = true)
+                            } else if (offsetX.value < -180f) {
+                                triggerCommit(isNeed = false)
+                            } else {
                                 coroutineScope.launch {
-                                    offsetX.snapTo(offsetX.value + dragAmount.x)
+                                    offsetX.animateTo(0f, animationSpec = tween(200))
                                 }
                             }
-                        )
-                    }
+                        },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            coroutineScope.launch {
+                                offsetX.snapTo(offsetX.value + dragAmount.x)
+                            }
+                        }
+                    )
                 },
             shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            colors = CardDefaults.cardColors(containerColor = cardColor),
             elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+                    .padding(18.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // Top Tag Indicator on Drag
+                // Header with drag badges
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (offsetX.value < -40f) {
+                    if (dragProgress < -0.1f) {
                         Surface(
                             shape = RoundedCornerShape(8.dp),
-                            color = ColorWarning.copy(alpha = 0.2f)
+                            color = ColorExpense,
+                            modifier = Modifier.padding(4.dp)
                         ) {
                             Text(
-                                text = "← WANT (Discretionary)",
-                                color = ColorWarning,
+                                "← WANT (INVEST IT)",
+                                color = Color.White,
                                 fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             )
                         }
                     } else {
                         Spacer(modifier = Modifier.width(1.dp))
                     }
 
-                    if (offsetX.value > 40f) {
+                    if (dragProgress > 0.1f) {
                         Surface(
                             shape = RoundedCornerShape(8.dp),
-                            color = ColorIncome.copy(alpha = 0.2f)
+                            color = ColorIncome,
+                            modifier = Modifier.padding(4.dp)
                         ) {
                             Text(
-                                text = "NEED (Essential) →",
-                                color = ColorIncome,
+                                "NEED (ESSENTIAL) →",
+                                color = Color.White,
                                 fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             )
                         }
-                    } else {
-                        Spacer(modifier = Modifier.width(1.dp))
                     }
                 }
 
-                // Transaction Details
+                // Transaction summary
                 Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(
-                        text = transaction.merchant,
-                        style = MaterialTheme.typography.headlineMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center
-                        )
-                    )
                     Text(
                         text = currencyFormat.format(transaction.amount),
                         style = MaterialTheme.typography.displaySmall.copy(
                             fontWeight = FontWeight.ExtraBold,
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                     )
                     Text(
+                        text = transaction.merchant,
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
                         text = formatTimestamp(transaction.timestampMillis),
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                }
 
-                // Bottom section depending on stage
-                if (stage == SwipeStage.NEEDS_VS_WANTS) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            text = "Swipe left for Wants, right for Needs",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.outline
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            OutlinedButton(
-                                onClick = {
-                                    selectedIsDiscretionary = true
-                                    stage = SwipeStage.SUB_CATEGORY
-                                },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Text("← Want")
-                            }
-
-                            Button(
-                                onClick = {
-                                    selectedIsDiscretionary = false
-                                    stage = SwipeStage.SUB_CATEGORY
-                                },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Text("Need →")
-                            }
-                        }
-                    }
-                } else {
-                    // Sub-category Selection
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Text(
-                            text = if (selectedIsDiscretionary) "Select Want Category:" else "Select Need Category:",
-                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
-                        )
-
-                        if (!selectedIsDiscretionary) {
-                            // Needs subcategories
-                            SubCategoryButton(
-                                title = "Rent / Mortgage",
-                                subtitle = "Marks as fixed monthly obligation",
-                                isHighlight = true,
-                                onClick = {
-                                    onCategorized("Rent/Mortgage", false, true, rememberRule)
-                                }
-                            )
-                            SubCategoryButton(
-                                title = "Groceries",
-                                subtitle = "Supermarkets, food essentials",
-                                onClick = {
-                                    onCategorized("Groceries", false, false, rememberRule)
-                                }
-                            )
-                            SubCategoryButton(
-                                title = "Bills & Utilities",
-                                subtitle = "Electric, water, phone, internet",
-                                onClick = {
-                                    onCategorized("Bills & Utilities", false, false, rememberRule)
-                                }
-                            )
-                            SubCategoryButton(
-                                title = "Gas & Fuel",
-                                subtitle = "Transportation fuel",
-                                onClick = {
-                                    onCategorized("Gas & Fuel", false, false, rememberRule)
-                                }
-                            )
-                            SubCategoryButton(
-                                title = "Debt Payment",
-                                subtitle = "Credit card or loan payment",
-                                onClick = {
-                                    onCategorized("Debt Payment", false, false, rememberRule)
-                                }
-                            )
-                        } else {
-                            // Wants subcategories
-                            SubCategoryButton(
-                                title = "Food & Dining",
-                                subtitle = "Eating out, coffee, fast food",
-                                onClick = {
-                                    onCategorized("Food & Dining", true, false, rememberRule)
-                                }
-                            )
-                            SubCategoryButton(
-                                title = "Entertainment",
-                                subtitle = "Movies, games, streaming, subscriptions",
-                                onClick = {
-                                    onCategorized("Entertainment", true, false, rememberRule)
-                                }
-                            )
-                            SubCategoryButton(
-                                title = "Shopping",
-                                subtitle = "Clothes, electronics, hobbies",
-                                onClick = {
-                                    onCategorized("Shopping", true, false, rememberRule)
-                                }
-                            )
-                            SubCategoryButton(
-                                title = "Personal Care / Other",
-                                subtitle = "Salon, fitness, non-essential",
-                                onClick = {
-                                    onCategorized("Personal Care", true, false, rememberRule)
-                                }
-                            )
-                        }
-
-                        // Remember Rule Toggle
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                    if (sameMerchantCount > 1) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.tertiaryContainer
                         ) {
                             Text(
-                                text = "Auto-tag all future ${transaction.merchant} spends",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                text = "⚡ $sameMerchantCount ${transaction.merchant} transactions will be auto-tagged",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                             )
-                            Switch(
-                                checked = rememberRule,
-                                onCheckedChange = { rememberRule = it }
-                            )
-                        }
-
-                        TextButton(
-                            onClick = { stage = SwipeStage.NEEDS_VS_WANTS },
-                            modifier = Modifier.align(Alignment.CenterHorizontally)
-                        ) {
-                            Text("← Back to Need vs Want")
                         }
                     }
                 }
+
+                // Category selector grid
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "Category: ${selectedCategory.icon} ${selectedCategory.name}",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(2),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 240.dp)
+                    ) {
+                        items(CATEGORY_OPTIONS) { cat ->
+                            val isSelected = cat.name == selectedCategory.name
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isSelected) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        selectedCategory = cat
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(cat.icon, fontSize = 16.sp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = cat.name,
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                        ),
+                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                                        else MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Hint
+                Text(
+                    text = "Swipe Right for Need • Swipe Left for Want",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
-    }
-}
 
-@Composable
-fun SubCategoryButton(
-    title: String,
-    subtitle: String,
-    isHighlight: Boolean = false,
-    onClick: () -> Unit
-) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        color = if (isHighlight) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier.fillMaxWidth()
-    ) {
+        // Two prominent action buttons below the card
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .padding(vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Column {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                    color = if (isHighlight) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (isHighlight) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.outline
-                )
+            Button(
+                onClick = { triggerCommit(isNeed = false) },
+                colors = ButtonDefaults.buttonColors(containerColor = ColorExpense),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(52.dp)
+            ) {
+                Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("WANT (Discretionary)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
-            Icon(
-                Icons.Filled.ChevronRight,
-                contentDescription = null,
-                tint = if (isHighlight) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.outline
-            )
+
+            Button(
+                onClick = { triggerCommit(isNeed = true) },
+                colors = ButtonDefaults.buttonColors(containerColor = ColorIncome),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(52.dp)
+            ) {
+                Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("NEED (Essential)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            }
         }
     }
 }
@@ -453,7 +447,7 @@ fun AllCaughtUpView(onDone: () -> Unit) {
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                Icons.Default.CheckCircle,
+                Icons.Filled.CheckCircle,
                 contentDescription = null,
                 tint = ColorIncome,
                 modifier = Modifier.size(44.dp)
@@ -467,7 +461,7 @@ fun AllCaughtUpView(onDone: () -> Unit) {
         )
 
         Text(
-            text = "Every transaction has been categorized into Needs and Wants. Your financial tracking and index fund opportunity calculations are up to date.",
+            text = "Every transaction has been categorized into Needs and Wants. Your financial tracking and fake portfolio calculations are up to date.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center

@@ -1,4 +1,4 @@
-﻿package com.example.financehome.data.remote
+package com.example.financehome.data.remote
 
 import com.google.gson.annotations.SerializedName
 
@@ -50,6 +50,9 @@ data class YahooChart(
  * Index `i` in [timestamp] corresponds to index `i` in every quote array.
  */
 data class YahooResult(
+    @SerializedName("meta")
+    val meta: YahooMeta? = null,
+
     /**
      * Unix epoch seconds for each candle's open time.
      * May be `null` if Yahoo returns no data for the requested range.
@@ -59,6 +62,20 @@ data class YahooResult(
 
     @SerializedName("indicators")
     val indicators: YahooIndicators?,
+)
+
+data class YahooMeta(
+    @SerializedName("regularMarketPrice")
+    val regularMarketPrice: Double? = null,
+
+    @SerializedName("chartPreviousClose")
+    val chartPreviousClose: Double? = null,
+
+    @SerializedName("previousClose")
+    val previousClose: Double? = null,
+
+    @SerializedName("symbol")
+    val symbol: String? = null
 )
 
 // ---------------------------------------------------------------------------
