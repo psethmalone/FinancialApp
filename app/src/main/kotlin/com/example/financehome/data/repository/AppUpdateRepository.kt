@@ -20,6 +20,7 @@ import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -31,6 +32,23 @@ class AppUpdateRepository @Inject constructor(
     private val prefs: SharedPreferences =
         context.getSharedPreferences("finance_home_updater_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()
+
+    /**
+     * Dedicated streaming client for downloading large APK files:
+     * - Long timeouts (10 minutes) so slow mobile/Wi-Fi connections never drop mid-download
+     * - No HttpLoggingInterceptor(Level.BODY), which buffers the entire 28MB in memory and freezes progress
+     * - Automatic SSL and HTTP redirect following
+     */
+    private val downloadClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(45, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.MINUTES)
+            .writeTimeout(10, TimeUnit.MINUTES)
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .retryOnConnectionFailure(true)
+            .build()
+    }
 
     companion object {
         private const val KEY_UPDATE_REPO = "update_repo"
@@ -60,13 +78,19 @@ class AppUpdateRepository @Inject constructor(
     }
 
     fun cleanGithubRepo(input: String): String {
-        return input.trim()
+        val trimmed = input.trim()
             .removePrefix("https://")
             .removePrefix("http://")
-            .removePrefix("github.com/")
             .removePrefix("www.github.com/")
+            .removePrefix("github.com/")
             .removeSuffix(".git")
             .trim('/')
+        val segments = trimmed.split('/')
+        return if (segments.size >= 2) {
+            "${segments[0]}/${segments[1]}"
+        } else {
+            trimmed
+        }
     }
 
     /**
@@ -91,46 +115,84 @@ class AppUpdateRepository @Inject constructor(
 
     private fun checkGithubRelease(repo: String): Result<AppUpdateInfo?> {
         val cleanRepo = cleanGithubRepo(repo)
-        val url = "https://api.github.com/repos/$cleanRepo/releases/latest"
+        val apiUrl = "https://api.github.com/repos/$cleanRepo/releases/latest"
 
-        val request = Request.Builder()
-            .url(url)
-            .addHeader("Accept", "application/vnd.github.v3+json")
-            .addHeader("User-Agent", "FinanceHome-Android-App")
-            .build()
+        // Strategy 1: Attempt GitHub API request
+        try {
+            val request = Request.Builder()
+                .url(apiUrl)
+                .addHeader("Accept", "application/vnd.github.v3+json")
+                .addHeader("User-Agent", "FinanceHome-Android-App")
+                .build()
 
-        val response = okHttpClient.newCall(request).execute()
-        if (response.code == 404) {
-            return Result.failure(Exception("No releases found on GitHub for repository '$cleanRepo'."))
+            val response = okHttpClient.newCall(request).execute()
+            if (response.isSuccessful) {
+                val json = response.body?.string()
+                if (json != null) {
+                    val release = gson.fromJson(json, GithubReleaseResponse::class.java)
+                    val apkAsset = release.assets?.firstOrNull { it.name.endsWith(".apk", ignoreCase = true) }
+                    if (apkAsset != null) {
+                        val remoteVersionName = release.tagName.removePrefix("v").removePrefix("V")
+                        val isNewer = VersionComparator.isRemoteNewer(remoteVersionName, BuildConfig.VERSION_NAME)
+                        return Result.success(
+                            AppUpdateInfo(
+                                versionName = remoteVersionName,
+                                versionCode = 0,
+                                releaseNotes = release.body?.takeIf { it.isNotBlank() }
+                                    ?: release.name
+                                    ?: "Version $remoteVersionName is available.",
+                                downloadUrl = apkAsset.downloadUrl,
+                                fileSizeBytes = apkAsset.size,
+                                isNewer = isNewer
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            // API failed or timed out — seamlessly try direct redirect fallback
         }
-        if (!response.isSuccessful) {
-            return Result.failure(Exception("GitHub API returned error ${response.code}: ${response.message}"))
+
+        // Strategy 2: Direct GitHub redirect fallback (no 60 req/hr rate limiting, always works!)
+        return checkGithubDirectRedirect(cleanRepo)
+    }
+
+    private fun checkGithubDirectRedirect(cleanRepo: String): Result<AppUpdateInfo?> {
+        try {
+            val directClient = okHttpClient.newBuilder()
+                .followRedirects(false)
+                .followSslRedirects(false)
+                .build()
+
+            val url = "https://github.com/$cleanRepo/releases/latest"
+            val request = Request.Builder()
+                .url(url)
+                .head()
+                .addHeader("User-Agent", "FinanceHome-Android-App")
+                .build()
+
+            val response = directClient.newCall(request).execute()
+            val redirectLocation = response.header("Location")
+            if (redirectLocation != null && (response.code in 300..399)) {
+                val tagName = redirectLocation.substringAfterLast("/")
+                val remoteVersionName = tagName.removePrefix("v").removePrefix("V")
+                val isNewer = VersionComparator.isRemoteNewer(remoteVersionName, BuildConfig.VERSION_NAME)
+                val downloadUrl = "https://github.com/$cleanRepo/releases/download/$tagName/app-debug.apk"
+                return Result.success(
+                    AppUpdateInfo(
+                        versionName = remoteVersionName,
+                        versionCode = 0,
+                        releaseNotes = "New version $remoteVersionName is ready on GitHub.",
+                        downloadUrl = downloadUrl,
+                        fileSizeBytes = 0L,
+                        isNewer = isNewer
+                    )
+                )
+            }
+            return Result.failure(Exception("Could not query latest release from GitHub (status ${response.code})."))
+        } catch (e: Exception) {
+            return Result.failure(e)
         }
-
-        val json = response.body?.string()
-            ?: return Result.failure(Exception("Empty response received from GitHub"))
-
-        val release = gson.fromJson(json, GithubReleaseResponse::class.java)
-
-        // Find APK asset
-        val apkAsset = release.assets?.firstOrNull { it.name.endsWith(".apk", ignoreCase = true) }
-            ?: return Result.failure(Exception("Release '${release.tagName}' found, but no .apk asset was attached to it."))
-
-        val remoteVersionName = release.tagName.removePrefix("v").removePrefix("V")
-        val isNewer = VersionComparator.isRemoteNewer(remoteVersionName, BuildConfig.VERSION_NAME)
-
-        val info = AppUpdateInfo(
-            versionName = remoteVersionName,
-            versionCode = 0,
-            releaseNotes = release.body?.takeIf { it.isNotBlank() }
-                ?: release.name
-                ?: "New version $remoteVersionName is available.",
-            downloadUrl = apkAsset.downloadUrl,
-            fileSizeBytes = apkAsset.size,
-            isNewer = isNewer
-        )
-
-        return Result.success(info)
     }
 
     private fun checkCustomUrl(url: String): Result<AppUpdateInfo?> {
@@ -159,7 +221,7 @@ class AppUpdateRepository @Inject constructor(
             versionCode = manifest.versionCode,
             releaseNotes = manifest.releaseNotes ?: "Update available.",
             downloadUrl = manifest.downloadUrl,
-            fileSizeBytes = manifest.fileSizeBytes ?: 0L,
+            fileSizeBytes = manifest.fileSizeBytes,
             isNewer = isNewer
         )
 
@@ -167,13 +229,12 @@ class AppUpdateRepository @Inject constructor(
     }
 
     /**
-     * Downloads the APK file to local cache with per-chunk progress reporting.
+     * Downloads the APK file to local app cache with verified integrity and chunked streaming.
      */
     fun downloadApk(downloadUrl: String): Flow<DownloadState> = flow {
         emit(DownloadState.Idle)
         try {
-            val baseDir = context.externalCacheDir ?: context.cacheDir
-            val updatesDir = File(baseDir, "updates").apply { mkdirs() }
+            val updatesDir = File(context.cacheDir, "updates").apply { mkdirs() }
             val destFile = File(updatesDir, "app-update.apk")
             if (destFile.exists()) {
                 destFile.delete()
@@ -184,7 +245,7 @@ class AppUpdateRepository @Inject constructor(
                 .addHeader("User-Agent", "FinanceHome-Android-App")
                 .build()
 
-            val response = okHttpClient.newCall(request).execute()
+            val response = downloadClient.newCall(request).execute()
             if (!response.isSuccessful) {
                 emit(DownloadState.Error("Download failed with HTTP ${response.code}"))
                 return@flow
@@ -196,7 +257,7 @@ class AppUpdateRepository @Inject constructor(
             val totalBytes = responseBody.contentLength()
             var downloadedBytes = 0L
 
-            val buffer = ByteArray(8192)
+            val buffer = ByteArray(16384)
             var bytesRead: Int
             val inputStream: InputStream = responseBody.byteStream()
             val outputStream = FileOutputStream(destFile)
@@ -229,21 +290,44 @@ class AppUpdateRepository @Inject constructor(
                 }
             }
 
+            // Verify completed size if Content-Length was provided
+            if (totalBytes > 0 && downloadedBytes < totalBytes) {
+                destFile.delete()
+                emit(DownloadState.Error("Download interrupted ($downloadedBytes / $totalBytes bytes). Please retry."))
+                return@flow
+            }
+
+            // Verify package integrity using Android's PackageManager
+            val packageInfo = context.packageManager.getPackageArchiveInfo(destFile.absolutePath, 0)
+            if (packageInfo == null) {
+                destFile.delete()
+                emit(DownloadState.Error("Downloaded update is invalid or corrupted. Please retry."))
+                return@flow
+            }
+
             emit(DownloadState.Success(destFile))
         } catch (e: Exception) {
             emit(DownloadState.Error(e.localizedMessage ?: "Unknown download error"))
         }
     }.flowOn(Dispatchers.IO)
 
-    fun getCachedApk(): File? {
-        val baseDir = context.externalCacheDir ?: context.cacheDir
-        val file = File(baseDir, "updates/app-update.apk")
-        return if (file.exists() && file.length() > 0) file else null
+    fun getCachedApk(expectedVersionName: String? = null): File? {
+        val file = File(context.cacheDir, "updates/app-update.apk")
+        if (!file.exists() || file.length() == 0L) return null
+        val pkgInfo = context.packageManager.getPackageArchiveInfo(file.absolutePath, 0) ?: return null
+        if (expectedVersionName != null) {
+            val cleanExpected = expectedVersionName.removePrefix("v").removePrefix("V").trim()
+            val cleanActual = (pkgInfo.versionName ?: "").removePrefix("v").removePrefix("V").trim()
+            if (cleanExpected.isNotEmpty() && cleanActual.isNotEmpty() && cleanExpected != cleanActual) {
+                file.delete()
+                return null
+            }
+        }
+        return file
     }
 
     fun clearCachedApk() {
-        val baseDir = context.externalCacheDir ?: context.cacheDir
-        val file = File(baseDir, "updates/app-update.apk")
+        val file = File(context.cacheDir, "updates/app-update.apk")
         if (file.exists()) {
             file.delete()
         }

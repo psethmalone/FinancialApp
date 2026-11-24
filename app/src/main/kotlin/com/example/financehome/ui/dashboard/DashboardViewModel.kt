@@ -70,6 +70,11 @@ class DashboardViewModel @Inject constructor(
     }
 
     fun openUpdateDialog() {
+        val update = availableUpdate.value
+        val cached = appUpdateRepo.getCachedApk(update?.versionName)
+        if (cached != null) {
+            downloadState.value = DownloadState.Success(cached)
+        }
         showUpdateDialog.value = true
     }
 

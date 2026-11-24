@@ -190,6 +190,11 @@ fun UpdateDialog(
                     Button(
                         onClick = {
                             if (!AppInstaller.canInstallPackages(context)) {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "Please allow 'Install unknown apps' for FinanceHome, then return to complete installation",
+                                    android.widget.Toast.LENGTH_LONG
+                                ).show()
                                 context.startActivity(AppInstaller.getInstallPermissionIntent(context))
                             } else {
                                 AppInstaller.installApk(context, downloadState.apkFile)

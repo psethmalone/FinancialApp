@@ -90,6 +90,12 @@ class SettingsViewModel @Inject constructor(
             val result = appUpdateRepo.checkForUpdate()
             result.onSuccess { info ->
                 if (info != null && info.isNewer) {
+                    val cached = appUpdateRepo.getCachedApk(info.versionName)
+                    if (cached != null) {
+                        downloadState.value = DownloadState.Success(cached)
+                    } else {
+                        downloadState.value = DownloadState.Idle
+                    }
                     updateCheckResult.value = UpdateCheckResult.UpdateAvailable(info)
                     showUpdateDialog.value = true
                 } else if (info != null) {
