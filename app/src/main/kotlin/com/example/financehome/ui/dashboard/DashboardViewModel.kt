@@ -14,6 +14,7 @@ import com.example.financehome.domain.AnalyticsEngine
 import com.example.financehome.domain.AnalyticsPeriod
 import com.example.financehome.domain.AnalyticsReport
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -23,15 +24,22 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.LocalDate
+import android.net.Uri
+import com.example.financehome.data.model.ReceiptItem
+import com.example.financehome.data.repository.ReceiptRepository
+import com.example.financehome.service.ParsedReceipt
+import java.io.File
 import javax.inject.Inject
 
 @HiltViewModel
 class DashboardViewModel @Inject constructor(
     private val transactionRepo: TransactionRepository,
     private val debtRepo: DebtRepository,
-    private val appUpdateRepo: AppUpdateRepository
+    private val appUpdateRepo: AppUpdateRepository,
+    private val receiptRepo: ReceiptRepository
 ) : ViewModel() {
 
+    val isScanningReceipt = MutableStateFlow(false)
     val availableUpdate = MutableStateFlow<AppUpdateInfo?>(null)
     val downloadState = MutableStateFlow<DownloadState>(DownloadState.Idle)
     val showUpdateDialog = MutableStateFlow(false)
@@ -205,4 +213,43 @@ class DashboardViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = 0.0
         )
+
+    fun getReceiptItems(transactionId: String): Flow<List<ReceiptItem>> =
+        receiptRepo.getReceiptItems(transactionId)
+
+    fun createReceiptCaptureFile(): Pair<File, Uri> =
+        receiptRepo.createReceiptCaptureFile()
+
+    suspend fun savePickedImageToInternalStorage(uri: Uri): String =
+        receiptRepo.savePickedImageToInternalStorage(uri)
+
+    fun attachReceipt(transactionId: String, imageUriString: String, onDone: ((Result<ParsedReceipt>) -> Unit)? = null) {
+        viewModelScope.launch {
+            isScanningReceipt.value = true
+            try {
+                val parsed = receiptRepo.processAndAttachReceipt(imageUriString, transactionId)
+                onDone?.invoke(Result.success(parsed))
+            } catch (e: Exception) {
+                onDone?.invoke(Result.failure(e))
+            } finally {
+                isScanningReceipt.value = false
+            }
+        }
+    }
+
+    fun addReceiptItem(item: ReceiptItem) {
+        viewModelScope.launch { receiptRepo.addReceiptItem(item) }
+    }
+
+    fun updateReceiptItem(item: ReceiptItem) {
+        viewModelScope.launch { receiptRepo.updateReceiptItem(item) }
+    }
+
+    fun deleteReceiptItem(item: ReceiptItem) {
+        viewModelScope.launch { receiptRepo.deleteReceiptItem(item) }
+    }
+
+    fun removeReceipt(transactionId: String) {
+        viewModelScope.launch { receiptRepo.removeReceipt(transactionId) }
+    }
 }

@@ -42,4 +42,7 @@ object DatabaseModule {
 
     @Provides
     fun providePortfolioDao(db: AppDatabase): com.example.financehome.data.local.PortfolioDao = db.portfolioDao()
+
+    @Provides
+    fun provideReceiptDao(db: AppDatabase): com.example.financehome.data.local.ReceiptDao = db.receiptDao()
 }

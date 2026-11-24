@@ -14,8 +14,8 @@ android {
         applicationId = "com.financehome.app"
         minSdk = 24
         targetSdk = 36
-        versionCode = 9
-        versionName = "1.0.8"
+        versionCode = 10
+        versionName = "1.0.9"
     }
 
     signingConfigs {
@@ -133,4 +133,8 @@ dependencies {
 
     // Kotlinx Datetime
     implementation(libs.kotlinx.datetime)
+
+    // ML Kit On-Device Text Recognition & Coil Image Loading
+    implementation(libs.mlkit.text.recognition)
+    implementation(libs.coil.compose)
 }

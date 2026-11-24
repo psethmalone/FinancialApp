@@ -1,4 +1,4 @@
-﻿package com.example.financehome.data.model
+package com.example.financehome.data.model
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
@@ -37,5 +37,7 @@ data class Transaction(
     val rawNotificationText: String?,
     val notes: String?,
     val isDiscretionary: Boolean,
-    val isSynced: Boolean = false
+    val isSynced: Boolean = false,
+    val receiptImageUri: String? = null,
+    val hasItemizedReceipt: Boolean = false
 )

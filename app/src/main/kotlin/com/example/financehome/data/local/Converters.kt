@@ -55,4 +55,17 @@ class Converters {
     @TypeConverter
     fun toTradeSource(value: String): com.example.financehome.data.model.TradeSource =
         com.example.financehome.data.model.TradeSource.valueOf(value)
+
+    // ── ReceiptItemCategory ──────────────────────────────────────────────────
+
+    @TypeConverter
+    fun fromReceiptItemCategory(value: com.example.financehome.data.model.ReceiptItemCategory): String = value.name
+
+    @TypeConverter
+    fun toReceiptItemCategory(value: String): com.example.financehome.data.model.ReceiptItemCategory =
+        try {
+            com.example.financehome.data.model.ReceiptItemCategory.valueOf(value)
+        } catch (_: Exception) {
+            com.example.financehome.data.model.ReceiptItemCategory.OTHER
+        }
 }

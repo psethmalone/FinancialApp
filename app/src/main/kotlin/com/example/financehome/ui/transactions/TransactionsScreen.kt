@@ -1,13 +1,20 @@
 package com.example.financehome.ui.transactions
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -15,15 +22,27 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import coil.compose.AsyncImage
+import com.example.financehome.data.model.ReceiptItem
+import com.example.financehome.data.model.ReceiptItemCategory
 import com.example.financehome.data.model.Transaction
 import com.example.financehome.data.model.TransactionType
 import com.example.financehome.ui.dashboard.formatTimestamp
 import com.example.financehome.ui.theme.ColorExpense
 import com.example.financehome.ui.theme.ColorIncome
+import kotlinx.coroutines.launch
+import java.io.File
 import java.text.NumberFormat
 import java.util.Locale
+import java.util.UUID
 
 val PREDEFINED_CATEGORIES = listOf(
     "Food & Dining",
@@ -166,8 +185,13 @@ fun TransactionsScreen(
 
     // Edit Transaction Bottom Sheet
     selectedTransactionForEdit?.let { transaction ->
+        val receiptItems by viewModel.getReceiptItems(transaction.id).collectAsState(initial = emptyList<ReceiptItem>())
+        val isScanning by viewModel.isScanningReceipt.collectAsState()
+
         TransactionDetailSheet(
             transaction = transaction,
+            receiptItems = receiptItems,
+            isScanning = isScanning,
             currencyFormat = currencyFormat,
             onDismiss = { selectedTransactionForEdit = null },
             onUpdateCategory = { newCategory ->
@@ -181,7 +205,14 @@ fun TransactionsScreen(
             onDelete = {
                 viewModel.deleteTransaction(transaction)
                 selectedTransactionForEdit = null
-            }
+            },
+            onCreateCaptureUri = { viewModel.createReceiptCaptureFile() },
+            onSavePickedUri = { uri -> viewModel.savePickedImageToInternalStorage(uri) },
+            onAttachReceipt = { uriStr -> viewModel.attachReceipt(transaction.id, uriStr) },
+            onAddItem = { item -> viewModel.addReceiptItem(item) },
+            onUpdateItem = { item -> viewModel.updateReceiptItem(item) },
+            onDeleteItem = { item -> viewModel.deleteReceiptItem(item) },
+            onRemoveReceipt = { viewModel.removeReceipt(transaction.id) }
         )
     }
 }
@@ -195,6 +226,7 @@ fun TransactionRowItem(
     val isDebit = transaction.type == TransactionType.DEBIT
     val amountFormatted = (if (isDebit) "-" else "+") + currencyFormat.format(transaction.amount)
     val dateFormatted = formatTimestamp(transaction.timestampMillis)
+    val hasReceipt = transaction.receiptImageUri != null || transaction.hasItemizedReceipt
 
     Card(
         modifier = Modifier
@@ -249,6 +281,13 @@ fun TransactionRowItem(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary
                         )
+                        if (hasReceipt) {
+                            Text(
+                                text = "• 🧾 Receipt",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
                         if (transaction.isDiscretionary && isDebit) {
                             Text(
                                 text = "• Discretionary",
@@ -284,8 +323,69 @@ fun TransactionDetailSheet(
     onDismiss: () -> Unit,
     onUpdateCategory: (String) -> Unit,
     onToggleDiscretionary: (Boolean) -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    receiptItems: List<ReceiptItem> = emptyList(),
+    isScanning: Boolean = false,
+    onCreateCaptureUri: (() -> Pair<File, Uri>)? = null,
+    onSavePickedUri: (suspend (Uri) -> String)? = null,
+    onAttachReceipt: ((String) -> Unit)? = null,
+    onAddItem: ((ReceiptItem) -> Unit)? = null,
+    onUpdateItem: ((ReceiptItem) -> Unit)? = null,
+    onDeleteItem: ((ReceiptItem) -> Unit)? = null,
+    onRemoveReceipt: (() -> Unit)? = null
 ) {
+    var showZoomImage by remember { mutableStateOf(false) }
+    var showAddItemDialog by remember { mutableStateOf(false) }
+    var editingItem by remember { mutableStateOf<ReceiptItem?>(null) }
+    var tempCameraFileUri by remember { mutableStateOf<String?>(null) }
+    val coroutineScope = rememberCoroutineScope()
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success && tempCameraFileUri != null) {
+            onAttachReceipt?.invoke(tempCameraFileUri!!)
+        }
+    }
+
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null && onSavePickedUri != null) {
+            coroutineScope.launch {
+                val localUri = onSavePickedUri(uri)
+                onAttachReceipt?.invoke(localUri)
+            }
+        }
+    }
+
+    fun launchCamera() {
+        if (onCreateCaptureUri != null) {
+            val (file, contentUri) = onCreateCaptureUri()
+            tempCameraFileUri = Uri.fromFile(file).toString()
+            cameraLauncher.launch(contentUri)
+        }
+    }
+
+    fun launchGallery() {
+        galleryLauncher.launch(
+            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+        )
+    }
+
+    // Receipt category calculations
+    val groceryTotal = receiptItems.filter { it.category == ReceiptItemCategory.GROCERY }.sumOf { it.price }
+    val fuelItems = receiptItems.filter { it.category == ReceiptItemCategory.FUEL }
+    val fuelTotal = fuelItems.sumOf { it.price }
+    val householdTotal = receiptItems.filter { it.category == ReceiptItemCategory.HOUSEHOLD }.sumOf { it.price }
+    val taxTotal = receiptItems.filter { it.category == ReceiptItemCategory.TAX }.sumOf { it.price }
+    val otherTotal = receiptItems.filter {
+        it.category != ReceiptItemCategory.GROCERY &&
+        it.category != ReceiptItemCategory.FUEL &&
+        it.category != ReceiptItemCategory.HOUSEHOLD &&
+        it.category != ReceiptItemCategory.TAX
+    }.sumOf { it.price }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -293,6 +393,7 @@ fun TransactionDetailSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp)
                 .padding(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -320,7 +421,7 @@ fun TransactionDetailSheet(
                 )
             }
 
-            Divider()
+            HorizontalDivider()
 
             // Discretionary Toggle
             Row(
@@ -345,7 +446,7 @@ fun TransactionDetailSheet(
                 )
             }
 
-            Divider()
+            HorizontalDivider()
 
             // Change Category Dropdown / Picker
             Text(
@@ -364,6 +465,318 @@ fun TransactionDetailSheet(
                     )
                 }
             }
+
+            // ---------------------------------------------------------------
+            // RECEIPT & ITEMIZATION SECTION
+            // ---------------------------------------------------------------
+            HorizontalDivider()
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Receipt & Items",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                    if (transaction.hasItemizedReceipt || receiptItems.isNotEmpty()) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer
+                        ) {
+                            Text(
+                                text = "${receiptItems.size} items",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Camera & Gallery actions
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    IconButton(
+                        onClick = { launchCamera() },
+                        enabled = !isScanning && onCreateCaptureUri != null
+                    ) {
+                        Icon(Icons.Default.PhotoCamera, contentDescription = "Take Photo")
+                    }
+                    IconButton(
+                        onClick = { launchGallery() },
+                        enabled = !isScanning && onSavePickedUri != null
+                    ) {
+                        Icon(Icons.Default.PhotoLibrary, contentDescription = "Pick Photo")
+                    }
+                }
+            }
+
+            // Scanning indicator card
+            if (isScanning) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            Text(
+                                text = "Scanning receipt with ML Kit...",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                            )
+                        }
+                        Text(
+                            text = "Extracting line items, fuel details, and calculating category breakdowns...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f)
+                        )
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            }
+
+            // Receipt image thumbnail & controls (if image attached)
+            if (transaction.receiptImageUri != null) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(72.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surface)
+                                .clickable { showZoomImage = true }
+                        ) {
+                            AsyncImage(
+                                model = transaction.receiptImageUri,
+                                contentDescription = "Receipt photo",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black.copy(alpha = 0.25f)),
+                                contentAlignment = Alignment.BottomEnd
+                            ) {
+                                Icon(
+                                    Icons.Default.ZoomIn,
+                                    contentDescription = "Zoom",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp).padding(2.dp)
+                                )
+                            }
+                        }
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Receipt Attached",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                            )
+                            Text(
+                                text = "Tap thumbnail to inspect full receipt",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                TextButton(
+                                    onClick = { launchCamera() },
+                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                                ) {
+                                    Text("Retake", style = MaterialTheme.typography.labelSmall)
+                                }
+                                TextButton(
+                                    onClick = { onRemoveReceipt?.invoke() },
+                                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                                ) {
+                                    Text("Remove", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if (!isScanning && receiptItems.isEmpty()) {
+                // Empty banner prompting to attach
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.ReceiptLong,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "No receipt attached",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                            )
+                            Text(
+                                text = "Snap a picture or choose from gallery to itemize groceries, fuel, and expenses.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Category Breakdown Badges (Groceries, Fuel, Household, etc.)
+            if (receiptItems.isNotEmpty()) {
+                Text(
+                    text = "Category Summary",
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
+                )
+
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (groceryTotal > 0) {
+                        item {
+                            CategoryBreakdownChip(
+                                emoji = "🛒",
+                                label = "Groceries",
+                                amount = currencyFormat.format(groceryTotal),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                textColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                    if (fuelTotal > 0) {
+                        val fuelSummaryDetail = fuelItems.firstOrNull { it.quantity > 1.0 && it.unitPrice != null }
+                        val detailText = if (fuelSummaryDetail != null) {
+                            "${fuelSummaryDetail.quantity} gal @ $${String.format(Locale.US, "%.3f", fuelSummaryDetail.unitPrice)}/gal"
+                        } else null
+
+                        item {
+                            CategoryBreakdownChip(
+                                emoji = "⛽",
+                                label = "Fuel",
+                                amount = currencyFormat.format(fuelTotal),
+                                detail = detailText,
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                textColor = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    }
+                    if (householdTotal > 0) {
+                        item {
+                            CategoryBreakdownChip(
+                                emoji = "🧻",
+                                label = "Household",
+                                amount = currencyFormat.format(householdTotal),
+                                color = MaterialTheme.colorScheme.tertiaryContainer,
+                                textColor = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                        }
+                    }
+                    if (taxTotal > 0) {
+                        item {
+                            CategoryBreakdownChip(
+                                emoji = "🧾",
+                                label = "Tax",
+                                amount = currencyFormat.format(taxTotal),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                textColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    if (otherTotal > 0) {
+                        item {
+                            CategoryBreakdownChip(
+                                emoji = "📦",
+                                label = "Other",
+                                amount = currencyFormat.format(otherTotal),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                textColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                // Itemized Line Items List
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Itemized Items (${receiptItems.size})",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
+                    )
+                    TextButton(
+                        onClick = { showAddItemDialog = true },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Add Item", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+
+                receiptItems.forEach { item ->
+                    ReceiptItemRow(
+                        item = item,
+                        currencyFormat = currencyFormat,
+                        onClick = { editingItem = item }
+                    )
+                }
+            } else if (transaction.receiptImageUri != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Itemized Items",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
+                    )
+                    TextButton(
+                        onClick = { showAddItemDialog = true },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Add Item", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                Text(
+                    text = "No line items detected automatically. You can add items manually using the button above.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            HorizontalDivider()
 
             if (!transaction.notes.isNullOrBlank()) {
                 Text(
@@ -389,4 +802,350 @@ fun TransactionDetailSheet(
             }
         }
     }
+
+    // Fullscreen Zoom Dialog for Receipt Image
+    if (showZoomImage && transaction.receiptImageUri != null) {
+        Dialog(
+            onDismissRequest = { showZoomImage = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = Color.Black
+            ) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    AsyncImage(
+                        model = transaction.receiptImageUri,
+                        contentDescription = "Zoomed Receipt",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    IconButton(
+                        onClick = { showZoomImage = false },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(16.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = Color.White,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // Add Item Dialog
+    if (showAddItemDialog) {
+        AddReceiptItemDialog(
+            transactionId = transaction.id,
+            onDismiss = { showAddItemDialog = false },
+            onAdd = { newItem ->
+                onAddItem?.invoke(newItem)
+                showAddItemDialog = false
+            }
+        )
+    }
+
+    // Edit Item Dialog
+    editingItem?.let { item ->
+        EditReceiptItemDialog(
+            item = item,
+            onDismiss = { editingItem = null },
+            onSave = { updated ->
+                onUpdateItem?.invoke(updated)
+                editingItem = null
+            },
+            onDelete = {
+                onDeleteItem?.invoke(item)
+                editingItem = null
+            }
+        )
+    }
+}
+
+@Composable
+fun CategoryBreakdownChip(
+    emoji: String,
+    label: String,
+    amount: String,
+    detail: String? = null,
+    color: Color,
+    textColor: Color
+) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = color,
+        contentColor = textColor
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(emoji, fontSize = 14.sp)
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold)
+                )
+            }
+            Text(
+                text = amount,
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+            )
+            if (detail != null) {
+                Text(
+                    text = detail,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = textColor.copy(alpha = 0.8f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ReceiptItemRow(
+    item: ReceiptItem,
+    currencyFormat: NumberFormat,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = item.category.emoji,
+                    fontSize = 20.sp
+                )
+                Column {
+                    Text(
+                        text = item.name,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            Text(
+                                text = item.category.displayName,
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                            )
+                        }
+                        if (item.quantity > 1.0 && item.unitPrice != null) {
+                            Text(
+                                text = "${item.quantity} @ ${currencyFormat.format(item.unitPrice)}/ea",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+            Text(
+                text = currencyFormat.format(item.price),
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+    }
+}
+
+@Composable
+fun AddReceiptItemDialog(
+    transactionId: String,
+    onDismiss: () -> Unit,
+    onAdd: (ReceiptItem) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var priceText by remember { mutableStateOf("") }
+    var quantityText by remember { mutableStateOf("1.0") }
+    var selectedCategory by remember { mutableStateOf(ReceiptItemCategory.GROCERY) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Receipt Item", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Item Name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = priceText,
+                    onValueChange = { priceText = it },
+                    label = { Text("Total Price ($)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = quantityText,
+                    onValueChange = { quantityText = it },
+                    label = { Text("Quantity (e.g. 1.0 or gallons)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Text("Category", style = MaterialTheme.typography.labelMedium)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(ReceiptItemCategory.values()) { cat ->
+                        FilterChip(
+                            selected = selectedCategory == cat,
+                            onClick = { selectedCategory = cat },
+                            label = { Text("${cat.emoji} ${cat.displayName}") }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val price = priceText.toDoubleOrNull() ?: 0.0
+                    val qty = quantityText.toDoubleOrNull() ?: 1.0
+                    val unitPrice = if (qty > 1.0) price / qty else null
+                    onAdd(
+                        ReceiptItem(
+                            id = UUID.randomUUID().toString(),
+                            transactionId = transactionId,
+                            name = name.trim().ifEmpty { "Item" },
+                            price = price,
+                            quantity = qty,
+                            unitPrice = unitPrice,
+                            category = selectedCategory
+                        )
+                    )
+                },
+                enabled = name.isNotBlank() && (priceText.toDoubleOrNull() != null)
+            ) {
+                Text("Add")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun EditReceiptItemDialog(
+    item: ReceiptItem,
+    onDismiss: () -> Unit,
+    onSave: (ReceiptItem) -> Unit,
+    onDelete: () -> Unit
+) {
+    var name by remember { mutableStateOf(item.name) }
+    var priceText by remember { mutableStateOf(item.price.toString()) }
+    var quantityText by remember { mutableStateOf(item.quantity.toString()) }
+    var selectedCategory by remember { mutableStateOf(item.category) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit Receipt Item", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Item Name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = priceText,
+                    onValueChange = { priceText = it },
+                    label = { Text("Total Price ($)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = quantityText,
+                    onValueChange = { quantityText = it },
+                    label = { Text("Quantity") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Text("Category", style = MaterialTheme.typography.labelMedium)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(ReceiptItemCategory.values()) { cat ->
+                        FilterChip(
+                            selected = selectedCategory == cat,
+                            onClick = { selectedCategory = cat },
+                            label = { Text("${cat.emoji} ${cat.displayName}") }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(
+                    onClick = onDelete,
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete")
+                }
+                Button(
+                    onClick = {
+                        val price = priceText.toDoubleOrNull() ?: item.price
+                        val qty = quantityText.toDoubleOrNull() ?: item.quantity
+                        val unitPrice = if (qty > 1.0) price / qty else null
+                        onSave(
+                            item.copy(
+                                name = name.trim().ifEmpty { item.name },
+                                price = price,
+                                quantity = qty,
+                                unitPrice = unitPrice,
+                                category = selectedCategory
+                            )
+                        )
+                    },
+                    enabled = name.isNotBlank() && (priceText.toDoubleOrNull() != null)
+                ) {
+                    Text("Save")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }

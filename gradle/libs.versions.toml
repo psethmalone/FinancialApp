@@ -33,6 +33,10 @@ firebaseBom = "33.14.0"
 kotlinxDatetime = "0.6.1"
 # Gson
 gson = "2.11.0"
+# ML Kit Text Recognition
+mlkitTextRecognition = "16.0.1"
+# Coil Image Loading
+coil = "2.7.0"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidxCore" }
@@ -90,6 +94,10 @@ firebase-auth-ktx = { group = "com.google.firebase", name = "firebase-auth-ktx" 
 
 # Kotlinx Datetime
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinxDatetime" }
+
+# ML Kit OCR & Coil
+mlkit-text-recognition = { module = "com.google.mlkit:text-recognition", version.ref = "mlkitTextRecognition" }
+coil-compose = { module = "io.coil-kt:coil-compose", version.ref = "coil" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "androidGradlePlugin" }

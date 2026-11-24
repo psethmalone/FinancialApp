@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.financehome.data.local.CategoryTotal
+import com.example.financehome.data.model.ReceiptItem
 import com.example.financehome.data.model.Transaction
 import com.example.financehome.data.model.TransactionType
 import com.example.financehome.ui.analytics.AnalyticsScreen
@@ -604,22 +605,35 @@ fun DashboardScreen(
     }
 
     if (selectedTransactionForDetail != null) {
+        val currentTx = selectedTransactionForDetail!!
+        val receiptItems by viewModel.getReceiptItems(currentTx.id).collectAsState(initial = emptyList<ReceiptItem>())
+        val isScanning by viewModel.isScanningReceipt.collectAsState()
+
         TransactionDetailSheet(
-            transaction = selectedTransactionForDetail!!,
+            transaction = currentTx,
+            receiptItems = receiptItems,
+            isScanning = isScanning,
             currencyFormat = currencyFormat,
             onDismiss = { selectedTransactionForDetail = null },
             onUpdateCategory = { newCategory ->
-                viewModel.updateTransactionCategory(selectedTransactionForDetail!!, newCategory)
+                viewModel.updateTransactionCategory(currentTx, newCategory)
                 selectedTransactionForDetail = null
             },
             onToggleDiscretionary = { isDisc ->
-                viewModel.toggleDiscretionary(selectedTransactionForDetail!!, isDisc)
+                viewModel.toggleDiscretionary(currentTx, isDisc)
                 selectedTransactionForDetail = selectedTransactionForDetail?.copy(isDiscretionary = isDisc)
             },
             onDelete = {
-                viewModel.deleteTransaction(selectedTransactionForDetail!!)
+                viewModel.deleteTransaction(currentTx)
                 selectedTransactionForDetail = null
-            }
+            },
+            onCreateCaptureUri = { viewModel.createReceiptCaptureFile() },
+            onSavePickedUri = { uri -> viewModel.savePickedImageToInternalStorage(uri) },
+            onAttachReceipt = { uriStr -> viewModel.attachReceipt(currentTx.id, uriStr) },
+            onAddItem = { item -> viewModel.addReceiptItem(item) },
+            onUpdateItem = { item -> viewModel.updateReceiptItem(item) },
+            onDeleteItem = { item -> viewModel.deleteReceiptItem(item) },
+            onRemoveReceipt = { viewModel.removeReceipt(currentTx.id) }
         )
     }
 
@@ -726,6 +740,13 @@ fun TransactionItemRow(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary
                         )
+                        if (transaction.receiptImageUri != null || transaction.hasItemizedReceipt) {
+                            Text(
+                                text = "• 🧾 Receipt",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
                         Text(
                             text = "•",
                             style = MaterialTheme.typography.labelSmall,

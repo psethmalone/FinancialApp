@@ -19,9 +19,10 @@ import com.example.financehome.data.model.Transaction
         CategoryRule::class,
         Bill::class,
         com.example.financehome.data.model.PortfolioHolding::class,
-        com.example.financehome.data.model.PortfolioTrade::class
+        com.example.financehome.data.model.PortfolioTrade::class,
+        com.example.financehome.data.model.ReceiptItem::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -33,6 +34,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun categoryRuleDao(): CategoryRuleDao
     abstract fun billDao(): BillDao
     abstract fun portfolioDao(): PortfolioDao
+    abstract fun receiptDao(): ReceiptDao
 
     companion object {
         const val DATABASE_NAME = "financehome.db"
@@ -75,6 +77,28 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE transactions ADD COLUMN receiptImageUri TEXT")
+                db.execSQL("ALTER TABLE transactions ADD COLUMN hasItemizedReceipt INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `receipt_items` (
+                        `id` TEXT NOT NULL,
+                        `transactionId` TEXT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `price` REAL NOT NULL,
+                        `quantity` REAL NOT NULL DEFAULT 1.0,
+                        `unitPrice` REAL,
+                        `category` TEXT NOT NULL DEFAULT 'GROCERY',
+                        `notes` TEXT,
+                        PRIMARY KEY(`id`),
+                        FOREIGN KEY(`transactionId`) REFERENCES `transactions`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_receipt_items_transactionId` ON `receipt_items` (`transactionId`)")
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -85,7 +109,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     DATABASE_NAME
                 )
-                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance

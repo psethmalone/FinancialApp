@@ -32,6 +32,9 @@ interface TransactionDao {
     @Delete
     suspend fun deleteTransaction(t: Transaction)
 
+    @Query("SELECT * FROM transactions WHERE id = :id LIMIT 1")
+    suspend fun getTransactionById(id: String): Transaction?
+
     @Query("SELECT * FROM transactions ORDER BY timestampMillis DESC")
     fun getAllTransactions(): Flow<List<Transaction>>
 
