@@ -51,7 +51,9 @@ data class PayPeriodSchedule(
     val nextPayDate: LocalDate,
     val obligations: List<UpcomingObligationItem>,
     val totalObligations: Double,
-    val safeToSpend: Double
+    val safeToSpend: Double,
+    val projectedTakeHomePay: Double = 0.0,
+    val isCurrentPeriod: Boolean = false
 ) {
     // Backwards compatibility properties
     val bills: List<UpcomingBillScheduleItem>
@@ -80,7 +82,13 @@ data class PaycheckBreakdown(
     val windowVariance: Double,
     val recommendedBuffer: Double,
     val upcomingPayPeriods: List<PayPeriodSchedule>,
-    val threePaycheckMonths: List<String>
+    val threePaycheckMonths: List<String>,
+    val currentTakeHomePay: Double = 0.0,
+    val baselineTakeHomePay: Double = 0.0,
+    val currentSafeToSpend: Double = 0.0,
+    val baselineSafeToSpend: Double = 0.0,
+    val isCurrentPeriodOvertime: Boolean = false,
+    val currentPeriodOvertimeHours: Double = 0.0
 ) {
     // Backwards compatibility properties
     val billsDueInPeriod: List<UpcomingBillScheduleItem>

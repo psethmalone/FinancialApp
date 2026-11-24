@@ -21,7 +21,11 @@ object PaycheckCalculator {
         bills: List<Bill>,
         debts: List<Debt>,
         config: PaycheckConfig,
-        currentDate: LocalDate = LocalDate.now()
+        currentDate: LocalDate = LocalDate.now(),
+        currentTakeHomePay: Double = config.typicalTakeHomePay,
+        baselineTakeHomePay: Double = config.typicalTakeHomePay,
+        isCurrentPeriodOvertime: Boolean = false,
+        currentPeriodOvertimeHours: Double = 0.0
     ): PaycheckBreakdown {
         val totalMonthlyBills = bills.sumOf { it.amount }
         val totalMonthlyDebtMinimums = debts.sumOf { it.minimumPayment }
@@ -34,7 +38,13 @@ object PaycheckCalculator {
             0.0
         }
 
-        val safeToSpend = config.typicalTakeHomePay - perPaycheckReserve
+        // Baseline safe to spend (standard recurring cushion)
+        val baselineSafeToSpend = baselineTakeHomePay - perPaycheckReserve
+        // Current pay period safe to spend (incorporates current hours/overtime/verified pay)
+        val currentSafeToSpend = currentTakeHomePay - perPaycheckReserve
+        val effectiveIsCurrentPeriodOvertime = isCurrentPeriodOvertime || (currentTakeHomePay > baselineTakeHomePay + 0.01)
+
+        val safeToSpend = currentSafeToSpend
         val isSurplus = safeToSpend >= 0.0
         val deficitAmount = if (!isSurplus) -safeToSpend else 0.0
 
@@ -67,13 +77,16 @@ object PaycheckCalculator {
         )
         val recommendedBuffer = maxOf(maxSingleObligation, (windowObligationsTotal - perPaycheckReserve).coerceAtLeast(0.0))
 
-        // Multi-pay period forward projection (next 3 pay periods)
+        // Multi-pay period forward projection:
+        // Period 1 uses currentTakeHomePay (actual hours logged).
+        // Periods 2+ strictly use baselineTakeHomePay (standard 40 hrs/wk baseline).
         val upcomingPayPeriods = projectUpcomingPayPeriods(
             bills = bills,
             debts = debts,
             firstPayDate = currentPayDate,
             frequency = config.frequency,
-            takeHomePay = config.typicalTakeHomePay,
+            currentTakeHomePay = currentTakeHomePay,
+            baselineTakeHomePay = baselineTakeHomePay,
             periodCount = 3
         )
 
@@ -104,7 +117,13 @@ object PaycheckCalculator {
             windowVariance = windowVariance,
             recommendedBuffer = recommendedBuffer,
             upcomingPayPeriods = upcomingPayPeriods,
-            threePaycheckMonths = threePayMonths
+            threePaycheckMonths = threePayMonths,
+            currentTakeHomePay = currentTakeHomePay,
+            baselineTakeHomePay = baselineTakeHomePay,
+            currentSafeToSpend = currentSafeToSpend,
+            baselineSafeToSpend = baselineSafeToSpend,
+            isCurrentPeriodOvertime = effectiveIsCurrentPeriodOvertime,
+            currentPeriodOvertimeHours = currentPeriodOvertimeHours
         )
     }
 
@@ -363,23 +382,28 @@ object PaycheckCalculator {
 
     /**
      * Projects forward multi-paycheck schedules (e.g. next 3 pay periods) with bills and debts mapped to each check.
+     * Period 1 uses currentTakeHomePay (reflecting logged hours/overtime/verified pay).
+     * Periods 2+ strictly use baselineTakeHomePay (reflecting standard 40 hrs/wk baseline).
      */
     fun projectUpcomingPayPeriods(
         bills: List<Bill>,
         debts: List<Debt> = emptyList(),
         firstPayDate: LocalDate,
         frequency: PayFrequency,
-        takeHomePay: Double,
+        currentTakeHomePay: Double,
+        baselineTakeHomePay: Double,
         periodCount: Int = 3
     ): List<PayPeriodSchedule> {
         val list = mutableListOf<PayPeriodSchedule>()
         var start = firstPayDate
 
         for (i in 0 until periodCount) {
+            val isCurrent = (i == 0)
+            val takeHome = if (isCurrent) currentTakeHomePay else baselineTakeHomePay
             val next = calculateFollowingPayDate(start, frequency)
             val windowObligations = getScheduledObligationsInWindow(bills, debts, start, next)
             val totalObligations = windowObligations.sumOf { it.amount }
-            val safeToSpend = takeHomePay - totalObligations
+            val safeToSpend = takeHome - totalObligations
 
             list.add(
                 PayPeriodSchedule(
@@ -388,7 +412,9 @@ object PaycheckCalculator {
                     nextPayDate = next,
                     obligations = windowObligations,
                     totalObligations = totalObligations,
-                    safeToSpend = safeToSpend
+                    safeToSpend = safeToSpend,
+                    projectedTakeHomePay = takeHome,
+                    isCurrentPeriod = isCurrent
                 )
             )
             start = next
@@ -396,4 +422,24 @@ object PaycheckCalculator {
 
         return list
     }
+
+    /**
+     * Backwards-compatible overload using single take-home pay.
+     */
+    fun projectUpcomingPayPeriods(
+        bills: List<Bill>,
+        debts: List<Debt> = emptyList(),
+        firstPayDate: LocalDate,
+        frequency: PayFrequency,
+        takeHomePay: Double,
+        periodCount: Int = 3
+    ): List<PayPeriodSchedule> = projectUpcomingPayPeriods(
+        bills = bills,
+        debts = debts,
+        firstPayDate = firstPayDate,
+        frequency = frequency,
+        currentTakeHomePay = takeHomePay,
+        baselineTakeHomePay = takeHomePay,
+        periodCount = periodCount
+    )
 }

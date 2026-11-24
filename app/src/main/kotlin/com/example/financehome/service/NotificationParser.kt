@@ -2,6 +2,7 @@ package com.example.financehome.service
 
 import com.example.financehome.data.model.TradeAction
 import com.example.financehome.data.model.TransactionType
+import java.util.Locale
 
 data class ParsedTransaction(
     val amount: Double,
@@ -246,8 +247,61 @@ class NotificationParser {
     }
 
     // -----------------------------------------------------------------------
-    // Generic Bank Fallback
+    // Generic Bank & SMS Text Alert Fallback
     // -----------------------------------------------------------------------
+
+    // "Chase: You made a $24.50 purchase at SHELL OIL" or "A $45.00 purchase at WALMART"
+    private val smsMadePurchaseAt = Regex(
+        """(?:made\s+(?:a\s+)?)?\${'$'}(?<amount>[\d,]+(?:\.\d{1,2})?)\s+(?:debit|credit)?\s*(?:purchase|transaction|charge)\s+at\s+(?<merchant>[^.\n\r$]+)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    // "Alert: A transaction of $45.12 was made on your card at WALMART"
+    private val smsTransactionOfAt = Regex(
+        """(?:transaction|charge|purchase)\s+of\s+\${'$'}(?<amount>[\d,]+(?:\.\d{1,2})?)\s+(?:was\s+made\s+)?(?:on\s+your\s+card\s+)?at\s+(?<merchant>[^.\n\r$]+)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    // "Navy Federal: Debit card ending 1234 was used for $18.25 at CHIPOTLE"
+    private val smsUsedForAt = Regex(
+        """used\s+for\s+\${'$'}(?<amount>[\d,]+(?:\.\d{1,2})?)\s+at\s+(?<merchant>[^.\n\r$]+)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    // "Wells Fargo: $50.00 was authorized at EXXON" or "Authorized: $50.00 at EXXON"
+    private val smsAuthorizedAt = Regex(
+        """(?:was\s+)?authorized(?:\s+for)?\s+\${'$'}(?<amount>[\d,]+(?:\.\d{1,2})?)\s+at\s+(?<merchant>[^.\n\r$]+)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val smsAmountAuthorizedAt = Regex(
+        """\${'$'}(?<amount>[\d,]+(?:\.\d{1,2})?)\s+(?:was\s+)?authorized\s+at\s+(?<merchant>[^.\n\r$]+)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    // "Capital One: A charge of $65.40 at HOME DEPOT was approved"
+    private val smsChargeAtApproved = Regex(
+        """charge\s+of\s+\${'$'}(?<amount>[\d,]+(?:\.\d{1,2})?)\s+at\s+(?<merchant>[^.\n\r$]+?)\s+(?:was\s+)?approved""",
+        RegexOption.IGNORE_CASE
+    )
+
+    // "FreeMsg: Charge at WALMART for $82.15 was approved" or "Purchase at TARGET for $45.00 was approved"
+    private val smsChargeAtForApproved = Regex(
+        """(?:charge|purchase|transaction)\s+at\s+(?<merchant>[^.\n\r$]+?)\s+for\s+\${'$'}(?<amount>[\d,]+(?:\.\d{1,2})?)(?:\s+(?:was\s+)?approved)?""",
+        RegexOption.IGNORE_CASE
+    )
+
+    // "Discover: A $35.00 purchase at BEST BUY was approved"
+    private val smsPurchaseAtApproved = Regex(
+        """\${'$'}(?<amount>[\d,]+(?:\.\d{1,2})?)\s+purchase\s+at\s+(?<merchant>[^.\n\r$]+?)\s+(?:was\s+)?approved""",
+        RegexOption.IGNORE_CASE
+    )
+
+    // "Amex: Approved $42.00 at TRADER JOE'S"
+    private val smsApprovedAt = Regex(
+        """Approved(?::)?\s+\${'$'}(?<amount>[\d,]+(?:\.\d{1,2})?)\s+at\s+(?<merchant>[^.\n\r$]+)""",
+        RegexOption.IGNORE_CASE
+    )
 
     private val genericChargedAt = Regex(
         """(?:was\s+)?charged\s+\${'$'}(?<amount>[\d,]+(?:\.\d{1,2})?)\s+at\s+(?<merchant>[^.\n\r]+)""",
@@ -290,6 +344,36 @@ class NotificationParser {
     )
 
     private fun parseGeneric(text: String): ParsedTransaction? {
+        // High-specificity SMS & Bank text alerts first
+        smsMadePurchaseAt.find(text)?.let { m ->
+            return ParsedTransaction(parseAmount(m.groups["amount"]!!.value), cleanMerchant(m.groups["merchant"]!!.value), TransactionType.DEBIT, text)
+        }
+        smsTransactionOfAt.find(text)?.let { m ->
+            return ParsedTransaction(parseAmount(m.groups["amount"]!!.value), cleanMerchant(m.groups["merchant"]!!.value), TransactionType.DEBIT, text)
+        }
+        smsUsedForAt.find(text)?.let { m ->
+            return ParsedTransaction(parseAmount(m.groups["amount"]!!.value), cleanMerchant(m.groups["merchant"]!!.value), TransactionType.DEBIT, text)
+        }
+        smsChargeAtApproved.find(text)?.let { m ->
+            return ParsedTransaction(parseAmount(m.groups["amount"]!!.value), cleanMerchant(m.groups["merchant"]!!.value), TransactionType.DEBIT, text)
+        }
+        smsChargeAtForApproved.find(text)?.let { m ->
+            return ParsedTransaction(parseAmount(m.groups["amount"]!!.value), cleanMerchant(m.groups["merchant"]!!.value), TransactionType.DEBIT, text)
+        }
+        smsPurchaseAtApproved.find(text)?.let { m ->
+            return ParsedTransaction(parseAmount(m.groups["amount"]!!.value), cleanMerchant(m.groups["merchant"]!!.value), TransactionType.DEBIT, text)
+        }
+        smsApprovedAt.find(text)?.let { m ->
+            return ParsedTransaction(parseAmount(m.groups["amount"]!!.value), cleanMerchant(m.groups["merchant"]!!.value), TransactionType.DEBIT, text)
+        }
+        smsAuthorizedAt.find(text)?.let { m ->
+            return ParsedTransaction(parseAmount(m.groups["amount"]!!.value), cleanMerchant(m.groups["merchant"]!!.value), TransactionType.DEBIT, text)
+        }
+        smsAmountAuthorizedAt.find(text)?.let { m ->
+            return ParsedTransaction(parseAmount(m.groups["amount"]!!.value), cleanMerchant(m.groups["merchant"]!!.value), TransactionType.DEBIT, text)
+        }
+
+        // General notifications
         genericChargedAt.find(text)?.let { m ->
             return ParsedTransaction(parseAmount(m.groups["amount"]!!.value), cleanMerchant(m.groups["merchant"]!!.value), TransactionType.DEBIT, text)
         }
@@ -335,11 +419,27 @@ class NotificationParser {
             .removePrefix("Cash App")
             .removePrefix("Cash Card:")
             .removePrefix("Cash Card")
+            .removePrefix("FreeMsg:")
+            .removePrefix("FreeMsg")
+            .removePrefix("Alert:")
+            .removePrefix("Alert")
+            .removePrefix("Chase:")
+            .removePrefix("Citi:")
+            .removePrefix("Citi Alert:")
+            .removePrefix("Amex:")
+            .removePrefix("Discover:")
+            .removePrefix("Capital One:")
+            .removePrefix("Wells Fargo:")
+            .removePrefix("Navy Federal:")
+            .removePrefix("USAA:")
             .removeSuffix(".")
             .removeSuffix(",")
             .removeSuffix(";")
+            .replace(Regex("""\s+(?:was\s+)?approved.*$""", RegexOption.IGNORE_CASE), "")
             .replace(Regex("""\s+on\s+\d{1,2}/\d{1,2}(?:/\d{2,4})?.*$""", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("""\s+using\s+card.*$""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\s+on\s+[A-Za-z]{3}\s+\d{1,2}.*$""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\s+(?:on|using|with)\s+(?:your\s+)?card.*$""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\s+card\s+ending.*$""", RegexOption.IGNORE_CASE), "")
             .trim()
     }
 

@@ -229,4 +229,61 @@ class PaycheckCalculatorTest {
         assertEquals(LocalDate.of(2026, 12, 5), debtObligation.dueDate)
         assertEquals(150.0, debtObligation.amount, 0.01)
     }
+
+    @Test
+    fun testDecoupledPaycheckOvertimeProjections() {
+        // Bills: $500 Rent (due 1st), Debts: $200 Loan (due 15th)
+        val bills = listOf(Bill("1", "Rent", 500.0, 1, "Housing"))
+        val debts = listOf(Debt("d1", "Auto Loan", 5000.0, 5000.0, 0.05, 200.0, DebtType.LOAN, 0L, dueDayOfMonth = 15))
+
+        val config = PaycheckConfig(
+            frequency = PayFrequency.BI_WEEKLY,
+            typicalTakeHomePay = 1600.0, // baseline
+            anchorPayDateEpochDay = LocalDate.of(2026, 11, 27).toEpochDay()
+        )
+        val today = LocalDate.of(2026, 11, 24)
+
+        // User worked 70 hours this period, giving an overtime take-home of $2400
+        // But baseline is $1600 (40 hrs/wk, 0 overtime)
+        val currentOvertimeTakeHome = 2400.0
+        val baselineTakeHome = 1600.0
+
+        val breakdown = PaycheckCalculator.calculateBreakdown(
+            bills = bills,
+            debts = debts,
+            config = config,
+            currentDate = today,
+            currentTakeHomePay = currentOvertimeTakeHome,
+            baselineTakeHomePay = baselineTakeHome
+        )
+
+        // Breakdown take-home checks
+        assertEquals(2400.0, breakdown.currentTakeHomePay, 0.01)
+        assertEquals(1600.0, breakdown.baselineTakeHomePay, 0.01)
+        assertTrue("Current period has overtime compared to baseline", breakdown.isCurrentPeriodOvertime)
+
+        // Equalized reserve: (500 + 200) * 12 / 26 = 323.0769
+        val reserve = breakdown.perPaycheckReserve
+        assertEquals(2400.0 - reserve, breakdown.currentSafeToSpend, 0.05)
+        assertEquals(1600.0 - reserve, breakdown.baselineSafeToSpend, 0.05)
+
+        // Check forward schedule: Period 1 uses currentTakeHome (2400), Period 2+ use baseline (1600)
+        val upcoming = breakdown.upcomingPayPeriods
+        assertTrue(upcoming.size >= 3)
+
+        val period1 = upcoming[0]
+        assertEquals(1, period1.periodIndex)
+        assertTrue("Period 1 is current period", period1.isCurrentPeriod)
+        assertEquals(2400.0, period1.projectedTakeHomePay, 0.01)
+
+        val period2 = upcoming[1]
+        assertEquals(2, period2.periodIndex)
+        assertFalse("Period 2 is future period", period2.isCurrentPeriod)
+        assertEquals(1600.0, period2.projectedTakeHomePay, 0.01)
+
+        val period3 = upcoming[2]
+        assertEquals(3, period3.periodIndex)
+        assertFalse("Period 3 is future period", period3.isCurrentPeriod)
+        assertEquals(1600.0, period3.projectedTakeHomePay, 0.01)
+    }
 }

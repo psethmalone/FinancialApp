@@ -21,6 +21,7 @@ class WageRepository @Inject constructor(
         private const val KEY_HOURLY_WAGE = "wage_hourly"
         private const val KEY_OT_MULTIPLIER = "wage_ot_multiplier"
         private const val KEY_DEDUCTION_PERCENT = "wage_deduction_percent"
+        private const val KEY_STANDARD_HOURS = "wage_standard_weekly_hours"
         private const val KEY_WEEK1_HOURS = "wage_week1_hours"
         private const val KEY_WEEK2_HOURS = "wage_week2_hours"
         private const val KEY_IS_VERIFIED = "wage_is_verified"
@@ -37,6 +38,7 @@ class WageRepository @Inject constructor(
             .putFloat(KEY_HOURLY_WAGE, config.hourlyWage.toFloat())
             .putFloat(KEY_OT_MULTIPLIER, config.overtimeMultiplier.toFloat())
             .putFloat(KEY_DEDUCTION_PERCENT, config.estimatedDeductionPercent.toFloat())
+            .putFloat(KEY_STANDARD_HOURS, config.standardWeeklyHours.toFloat())
             .putFloat(KEY_WEEK1_HOURS, config.week1Hours.toFloat())
             .putFloat(KEY_WEEK2_HOURS, config.week2Hours.toFloat())
             .putBoolean(KEY_IS_VERIFIED, config.isPaycheckVerified)
@@ -79,6 +81,7 @@ class WageRepository @Inject constructor(
         val wage = prefs.getFloat(KEY_HOURLY_WAGE, 25f).toDouble()
         val otMult = prefs.getFloat(KEY_OT_MULTIPLIER, 1.5f).toDouble()
         val dedPercent = prefs.getFloat(KEY_DEDUCTION_PERCENT, 18f).toDouble()
+        val stdHours = prefs.getFloat(KEY_STANDARD_HOURS, 40f).toDouble()
         val w1 = prefs.getFloat(KEY_WEEK1_HOURS, 40f).toDouble()
         val w2 = prefs.getFloat(KEY_WEEK2_HOURS, 40f).toDouble()
         val isVerified = prefs.getBoolean(KEY_IS_VERIFIED, false)
@@ -92,6 +95,7 @@ class WageRepository @Inject constructor(
             hourlyWage = wage,
             overtimeMultiplier = otMult,
             estimatedDeductionPercent = dedPercent,
+            standardWeeklyHours = stdHours,
             week1Hours = w1,
             week2Hours = w2,
             isPaycheckVerified = isVerified,

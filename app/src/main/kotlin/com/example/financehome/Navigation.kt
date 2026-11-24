@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.ReceiptLong
@@ -21,6 +22,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.financehome.data.model.Debt
 import com.example.financehome.data.model.ReceiptItem
 import com.example.financehome.data.model.Transaction
+import com.example.financehome.ui.cashflow.CashFlowScreen
 import com.example.financehome.ui.categorize.SwipeCategorizeScreen
 import com.example.financehome.ui.categorize.SwipeCategorizeViewModel
 import com.example.financehome.ui.csvimport.CsvImportScreen
@@ -45,6 +47,7 @@ import java.util.Locale
 
 enum class MainTab(val label: String, val icon: ImageVector) {
     DASHBOARD("Home", Icons.Default.Dashboard),
+    CASH_FLOW("Cash Flow", Icons.Default.CalendarMonth),
     DEBTS("Bills & Debt", Icons.Default.CreditCard),
     OPPORTUNITY("Invest", Icons.Default.TrendingUp),
     SETTINGS("Settings", Icons.Default.Settings)
@@ -166,6 +169,9 @@ fun AppNavigation(
                                 onNavigateToAddTransaction = { showAddTransactionScreen = true },
                                 onNavigateToDebts = { selectedTab = MainTab.DEBTS },
                                 onNavigateToSwipeCategorize = { showSwipeCategorizeScreen = true }
+                            )
+                            MainTab.CASH_FLOW -> CashFlowScreen(
+                                viewModel = debtsViewModel
                             )
                             MainTab.DEBTS -> DebtsScreen(
                                 viewModel = debtsViewModel,

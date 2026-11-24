@@ -50,11 +50,13 @@ fun SettingsScreen(
     val showUpdateDialog by viewModel.showUpdateDialog.collectAsState()
 
     val notificationLogs by viewModel.notificationLogs.collectAsState()
+    val notificationFilterConfig by viewModel.notificationFilterConfig.collectAsState()
     val simulationFeedback by viewModel.simulationFeedback.collectAsState()
 
     var showCloudSyncDialog by remember { mutableStateOf(false) }
     var showEditRepoDialog by remember { mutableStateOf(false) }
     var showCustomSimulatorDialog by remember { mutableStateOf(false) }
+    var showAppFilterDialog by remember { mutableStateOf(false) }
     var editingRepoText by remember { mutableStateOf("") }
     var customSimulatorText by remember { mutableStateOf("") }
     var showLogsExpanded by remember { mutableStateOf(false) }
@@ -129,6 +131,15 @@ fun SettingsScreen(
                             else MaterialTheme.colorScheme.onErrorContainer
                         )
 
+                        FilledTonalButton(
+                            onClick = { showAppFilterDialog = true },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Monitored Apps & SMS Rules (${notificationFilterConfig.monitoredPackages.size} apps)")
+                        }
+
                         if (!hasNotificationPermission) {
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
@@ -190,7 +201,7 @@ fun SettingsScreen(
                         }
 
                         Text(
-                            text = "Tap to simulate incoming bank notifications to immediately verify parser, auto-categorizer, and swipe queue without waiting for a bank purchase.",
+                            text = "Tap to simulate incoming bank notifications or text messages to immediately verify parser, auto-categorizer, and swipe queue without waiting for a bank purchase.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -212,14 +223,14 @@ fun SettingsScreen(
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Button(
                                 onClick = { viewModel.simulateCashApp(context) },
                                 modifier = Modifier.weight(1f),
                                 contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
                             ) {
-                                Text("Cash App ($12.50)", fontSize = 12.sp)
+                                Text("Cash App", fontSize = 11.sp)
                             }
 
                             Button(
@@ -227,7 +238,15 @@ fun SettingsScreen(
                                 modifier = Modifier.weight(1f),
                                 contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
                             ) {
-                                Text("Ally Bank ($45)", fontSize = 12.sp)
+                                Text("Ally Bank", fontSize = 11.sp)
+                            }
+
+                            Button(
+                                onClick = { viewModel.simulateBankSms(context) },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                            ) {
+                                Text("Bank SMS", fontSize = 11.sp)
                             }
                         }
 
@@ -779,6 +798,20 @@ fun SettingsScreen(
                     Text("Cancel")
                 }
             }
+        )
+    }
+
+    if (showAppFilterDialog) {
+        MonitoredAppsDialog(
+            config = notificationFilterConfig,
+            onDismiss = { showAppFilterDialog = false },
+            onTogglePackage = { viewModel.toggleMonitoredPackage(it) },
+            onToggleSmsEnabled = { viewModel.setSmsEnabled(it) },
+            onToggleRequireDollar = { viewModel.setRequireDollarSignForSms(it) },
+            onAddKeyword = { viewModel.addSmsKeyword(it) },
+            onRemoveKeyword = { viewModel.removeSmsKeyword(it) },
+            onResetKeywords = { viewModel.resetSmsKeywords() },
+            onAddCustomPackage = { viewModel.setPackageMonitored(it, true) }
         )
     }
 }

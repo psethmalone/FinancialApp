@@ -25,6 +25,7 @@ import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
 
+import com.example.financehome.data.repository.NotificationFilterRepository
 import com.example.financehome.data.repository.NotificationLogRepository
 import com.example.financehome.service.NotificationParser
 
@@ -32,7 +33,8 @@ import com.example.financehome.service.NotificationParser
 class SettingsViewModel @Inject constructor(
     private val transactionRepo: TransactionRepository,
     private val appUpdateRepo: AppUpdateRepository,
-    private val notificationLogRepo: NotificationLogRepository
+    private val notificationLogRepo: NotificationLogRepository,
+    private val notificationFilterRepo: NotificationFilterRepository
 ) : ViewModel() {
 
     val isCloudSyncEnabled = MutableStateFlow(false)
@@ -40,6 +42,7 @@ class SettingsViewModel @Inject constructor(
     val exportState = MutableStateFlow<String?>(null)
 
     val notificationLogs = notificationLogRepo.logs
+    val notificationFilterConfig = notificationFilterRepo.config
     val simulationFeedback = MutableStateFlow<String?>(null)
 
     val updateCheckResult = MutableStateFlow<UpdateCheckResult>(UpdateCheckResult.Idle)
@@ -47,6 +50,34 @@ class SettingsViewModel @Inject constructor(
     val updateRepo = MutableStateFlow(appUpdateRepo.getUpdateRepo())
     val isAutoCheckUpdatesEnabled = MutableStateFlow(appUpdateRepo.isAutoCheckEnabled())
     val showUpdateDialog = MutableStateFlow(false)
+
+    fun toggleMonitoredPackage(packageName: String) {
+        notificationFilterRepo.togglePackageMonitored(packageName)
+    }
+
+    fun setPackageMonitored(packageName: String, enabled: Boolean) {
+        notificationFilterRepo.setPackageMonitored(packageName, enabled)
+    }
+
+    fun setSmsEnabled(enabled: Boolean) {
+        notificationFilterRepo.setSmsEnabled(enabled)
+    }
+
+    fun setRequireDollarSignForSms(enabled: Boolean) {
+        notificationFilterRepo.setRequireDollarSignForSms(enabled)
+    }
+
+    fun addSmsKeyword(keyword: String) {
+        notificationFilterRepo.addSmsKeyword(keyword)
+    }
+
+    fun removeSmsKeyword(keyword: String) {
+        notificationFilterRepo.removeSmsKeyword(keyword)
+    }
+
+    fun resetSmsKeywords() {
+        notificationFilterRepo.resetKeywordsToDefault()
+    }
 
     fun simulateCashApp(context: Context) {
         viewModelScope.launch {
@@ -69,6 +100,18 @@ class SettingsViewModel @Inject constructor(
                 "A $45.00 transaction was made using your Ally Bank Debit Card at WALMART"
             )
             simulationFeedback.value = if (res != null) "✓ Simulated Ally Bank: \$45.00 at WALMART captured!" else "Simulation failed"
+        }
+    }
+
+    fun simulateBankSms(context: Context) {
+        viewModelScope.launch {
+            val res = notificationLogRepo.simulateNotification(
+                context,
+                "com.google.android.apps.messaging",
+                "Chase",
+                "Chase: You made a $24.50 purchase at SHELL OIL on Nov 24 using card 1234."
+            )
+            simulationFeedback.value = if (res != null) "✓ Simulated Bank SMS: ${res.merchant} \$${res.amount} captured!" else "Simulation failed"
         }
     }
 

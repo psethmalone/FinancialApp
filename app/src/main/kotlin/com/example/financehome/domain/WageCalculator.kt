@@ -44,6 +44,41 @@ object WageCalculator {
         )
     }
 
+    /**
+     * Calculates the baseline/standard paycheck take-home pay based on standard regular hours
+     * (e.g. 40 hrs/wk, 80 hrs bi-weekly), completely free of temporary overtime.
+     * This is used for all future pay periods and equalized annual reserve targets.
+     */
+    fun calculateBaselineEstimate(
+        config: WageConfig,
+        frequency: PayFrequency = PayFrequency.BI_WEEKLY
+    ): WageEstimate {
+        val stdWeekly = maxOf(0.0, config.standardWeeklyHours)
+        val baselineHours = when (frequency) {
+            PayFrequency.WEEKLY -> stdWeekly
+            PayFrequency.BI_WEEKLY -> stdWeekly * 2.0
+            PayFrequency.SEMI_MONTHLY -> (stdWeekly * 52.0) / 24.0
+            PayFrequency.MONTHLY -> (stdWeekly * 52.0) / 12.0
+        }
+
+        val grossPay = baselineHours * config.hourlyWage
+        val deductionFraction = (config.estimatedDeductionPercent / 100.0).coerceIn(0.0, 1.0)
+        val estimatedDeductions = grossPay * deductionFraction
+        val estimatedNetPay = maxOf(0.0, grossPay - estimatedDeductions)
+
+        return WageEstimate(
+            totalHours = baselineHours,
+            regularHours = baselineHours,
+            overtimeHours = 0.0,
+            grossPay = grossPay,
+            estimatedDeductions = estimatedDeductions,
+            estimatedNetPay = estimatedNetPay,
+            isVerified = false,
+            verifiedNetPay = null,
+            effectiveTakeHomePay = estimatedNetPay
+        )
+    }
+
     private fun splitRegularAndOvertime(hours: Double): Pair<Double, Double> {
         val clampedHours = maxOf(0.0, hours)
         return if (clampedHours > 40.0) {

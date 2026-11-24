@@ -188,4 +188,74 @@ class NotificationParserTest {
         assertEquals("Starbucks", result.merchant)
         assertEquals(TransactionType.DEBIT, result.type)
     }
+
+    @Test
+    fun testBankSms_chaseMadePurchase() {
+        val result = parser.parse(
+            packageName = "com.google.android.apps.messaging",
+            title = "Chase",
+            text = "Chase: You made a purchase of $64.20 at TARGET on card ending 1234"
+        )
+
+        assertNotNull(result)
+        assertEquals(64.20, result!!.amount, 0.001)
+        assertEquals("TARGET", result.merchant)
+        assertEquals(TransactionType.DEBIT, result.type)
+    }
+
+    @Test
+    fun testBankSms_citiTransactionOfAt() {
+        val result = parser.parse(
+            packageName = "com.samsung.android.messaging",
+            title = "Citi Alert",
+            text = "Citi Alert: A transaction of $45.10 at SHELL OIL was approved"
+        )
+
+        assertNotNull(result)
+        assertEquals(45.10, result!!.amount, 0.001)
+        assertEquals("SHELL OIL", result.merchant)
+        assertEquals(TransactionType.DEBIT, result.type)
+    }
+
+    @Test
+    fun testBankSms_usedForAt() {
+        val result = parser.parse(
+            packageName = "com.google.android.apps.messaging",
+            title = "Bank Alert",
+            text = "Card ending 4321 was used for $128.50 at BEST BUY"
+        )
+
+        assertNotNull(result)
+        assertEquals(128.50, result!!.amount, 0.001)
+        assertEquals("BEST BUY", result.merchant)
+        assertEquals(TransactionType.DEBIT, result.type)
+    }
+
+    @Test
+    fun testBankSms_authorizedAt() {
+        val result = parser.parse(
+            packageName = "com.google.android.apps.messaging",
+            title = "Card Notification",
+            text = "Alert: $75.00 authorized at HOME DEPOT"
+        )
+
+        assertNotNull(result)
+        assertEquals(75.00, result!!.amount, 0.001)
+        assertEquals("HOME DEPOT", result.merchant)
+        assertEquals(TransactionType.DEBIT, result.type)
+    }
+
+    @Test
+    fun testBankSms_chargeApprovedAt() {
+        val result = parser.parse(
+            packageName = "com.google.android.apps.messaging",
+            title = "Bank",
+            text = "FreeMsg: Charge at WALMART for $82.15 was approved"
+        )
+
+        assertNotNull(result)
+        assertEquals(82.15, result!!.amount, 0.001)
+        assertEquals("WALMART", result.merchant)
+        assertEquals(TransactionType.DEBIT, result.type)
+    }
 }

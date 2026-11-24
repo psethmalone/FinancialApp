@@ -1,0 +1,1520 @@
+package com.example.financehome.ui.cashflow
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.financehome.data.model.Bill
+import com.example.financehome.data.model.Debt
+import com.example.financehome.domain.*
+import com.example.financehome.ui.debts.DebtsViewModel
+import com.example.financehome.ui.theme.ColorExpense
+import com.example.financehome.ui.theme.ColorIncome
+import com.example.financehome.ui.theme.ColorWarning
+import java.text.NumberFormat
+import java.time.LocalDate
+import java.time.YearMonth
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CashFlowScreen(
+    viewModel: DebtsViewModel,
+    modifier: Modifier = Modifier
+) {
+    val bills by viewModel.bills.collectAsState()
+    val debts by viewModel.debts.collectAsState()
+    val paycheckBreakdown by viewModel.paycheckBreakdown.collectAsState()
+    val paycheckConfig by viewModel.paycheckConfig.collectAsState()
+    val wageConfig by viewModel.wageConfig.collectAsState()
+    val wageEstimate by viewModel.wageEstimate.collectAsState()
+    val baselineWageEstimate by viewModel.baselineWageEstimate.collectAsState()
+
+    var showEditPaycheckDialog by remember { mutableStateOf(false) }
+    var showEditWageDialog by remember { mutableStateOf(false) }
+    var showVerifyPaydayDialog by remember { mutableStateOf(false) }
+
+    val currencyFormat = NumberFormat.getCurrencyInstance(Locale.US)
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Cash Flow & Payday", fontWeight = FontWeight.Bold) },
+                actions = {
+                    IconButton(onClick = { showEditWageDialog = true }) {
+                        Icon(Icons.Default.Tune, contentDescription = "Wage & Payday Settings")
+                    }
+                }
+            )
+        },
+        modifier = modifier
+    ) { innerPadding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(horizontal = 16.dp),
+            contentPadding = PaddingValues(top = 8.dp, bottom = 80.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Next Payday Countdown Hero Banner
+            item {
+                NextPaydayHeroCard(
+                    breakdown = paycheckBreakdown,
+                    config = paycheckConfig,
+                    wageEstimate = wageEstimate,
+                    baselineEstimate = baselineWageEstimate,
+                    currencyFormat = currencyFormat,
+                    onEditPaycheck = { showEditPaycheckDialog = true }
+                )
+            }
+
+            // Weekly Wage & Hours Worked Tracker Card
+            item {
+                CashFlowWageHoursCard(
+                    wageConfig = wageConfig,
+                    wageEstimate = wageEstimate,
+                    baselineEstimate = baselineWageEstimate,
+                    paycheckConfig = paycheckConfig,
+                    currencyFormat = currencyFormat,
+                    onEditWage = { showEditWageDialog = true },
+                    onAdjustW1 = { viewModel.adjustWeek1Hours(it) },
+                    onAdjustW2 = { viewModel.adjustWeek2Hours(it) },
+                    onVerifyPayday = { showVerifyPaydayDialog = true },
+                    onResetPeriod = { viewModel.resetPayPeriodHours() }
+                )
+            }
+
+            // Interactive Paydays & Due Dates Calendar
+            item {
+                CashFlowCalendarCard(
+                    bills = bills,
+                    debts = debts,
+                    paycheckConfig = paycheckConfig,
+                    currencyFormat = currencyFormat,
+                    onToggleBillPaid = { viewModel.toggleBillPaid(it) },
+                    onToggleDebtPaid = { viewModel.toggleDebtPaid(it) }
+                )
+            }
+
+            // Paycheck Cushion & Multi-Period Forward Schedule
+            item {
+                CashFlowPaycheckPlannerCard(
+                    breakdown = paycheckBreakdown,
+                    config = paycheckConfig,
+                    currencyFormat = currencyFormat,
+                    onEditPaycheck = { showEditPaycheckDialog = true },
+                    onToggleObligationPaid = { item ->
+                        if (item.type == ObligationType.BILL && item.originalBill != null) {
+                            viewModel.toggleBillPaid(item.originalBill)
+                        } else if (item.type == ObligationType.DEBT && item.originalDebt != null) {
+                            viewModel.toggleDebtPaid(item.originalDebt)
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    if (showEditPaycheckDialog) {
+        CashFlowEditPaycheckDialog(
+            currentConfig = paycheckConfig,
+            onDismiss = { showEditPaycheckDialog = false },
+            onSave = { newConfig ->
+                viewModel.updatePaycheckConfig(newConfig)
+                showEditPaycheckDialog = false
+            }
+        )
+    }
+
+    if (showEditWageDialog) {
+        CashFlowEditWageDialog(
+            currentConfig = wageConfig,
+            frequency = paycheckConfig.frequency,
+            onDismiss = { showEditWageDialog = false },
+            onSave = { newConfig ->
+                viewModel.updateWageConfig(newConfig)
+                showEditWageDialog = false
+            }
+        )
+    }
+
+    if (showVerifyPaydayDialog) {
+        CashFlowVerifyPaydayDialog(
+            estimatedNet = wageEstimate.effectiveTakeHomePay,
+            currencyFormat = currencyFormat,
+            onDismiss = { showVerifyPaydayDialog = false },
+            onConfirm = { actualNet ->
+                viewModel.verifyPaycheck(actualNet)
+                showVerifyPaydayDialog = false
+            }
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 1. Next Payday Hero Card
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun NextPaydayHeroCard(
+    breakdown: PaycheckBreakdown,
+    config: PaycheckConfig,
+    wageEstimate: WageEstimate,
+    baselineEstimate: WageEstimate,
+    currencyFormat: NumberFormat,
+    onEditPaycheck: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val dtf = DateTimeFormatter.ofPattern("EEE, MMM d", Locale.US)
+    val nextPayDateStr = breakdown.currentPayDate.format(dtf)
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Event,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = "Next Payday: $nextPayDateStr",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primary
+                ) {
+                    Text(
+                        text = if (breakdown.daysUntilPay == 0L) "TODAY! 💰" else "${breakdown.daysUntilPay} days",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+
+            // Income Estimate for this check vs Baseline
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                Column {
+                    Text(
+                        text = if (wageEstimate.overtimeHours > 0.0) "Expected Deposit (with OT)" else "Expected Deposit",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                    )
+                    Text(
+                        text = currencyFormat.format(breakdown.currentTakeHomePay),
+                        style = MaterialTheme.typography.headlineMedium.copy(
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                }
+
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = "Baseline (Standard 40h)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                    )
+                    Text(
+                        text = currencyFormat.format(breakdown.baselineTakeHomePay),
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    )
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.15f))
+
+            // Safe to spend remainder
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Safe-to-Spend this cycle:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                Text(
+                    text = "${currencyFormat.format(breakdown.perPaycheckSafeToSpend)} (${currencyFormat.format(breakdown.dailySafeToSpend)}/day)",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = if (breakdown.isSurplus) ColorIncome else ColorExpense
+                    )
+                )
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2. Wage & Hours Worked Tracker Card
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun CashFlowWageHoursCard(
+    wageConfig: WageConfig,
+    wageEstimate: WageEstimate,
+    baselineEstimate: WageEstimate,
+    paycheckConfig: PaycheckConfig,
+    currencyFormat: NumberFormat,
+    onEditWage: () -> Unit,
+    onAdjustW1: (Double) -> Unit,
+    onAdjustW2: (Double) -> Unit,
+    onVerifyPayday: () -> Unit,
+    onResetPeriod: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            // Header: Wage info + Edit button
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.secondaryContainer),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Work,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "Hours & Paycheck Estimator",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "${currencyFormat.format(wageConfig.hourlyWage)}/hr • ${String.format(Locale.US, "%.1f", wageConfig.overtimeMultiplier)}x OT (>40h)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                IconButton(onClick = onEditWage) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = "Edit Wage Settings",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+            // Verified Status Banner vs Estimated Banner
+            if (wageConfig.isPaycheckVerified) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = ColorIncome.copy(alpha = 0.15f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = ColorIncome,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = "Payday Verified",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = ColorIncome
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Actual Deposit: ${currencyFormat.format(wageConfig.verifiedNetPay ?: wageEstimate.estimatedNetPay)}",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Current pay cycle verified.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = onResetPeriod,
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text("Next Cycle", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            } else {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (wageEstimate.overtimeHours > 0.0) "This Check (with ${String.format(Locale.US, "%.1f", wageEstimate.overtimeHours)}h OT)" else "Estimated Take-Home Pay",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = currencyFormat.format(wageEstimate.estimatedNetPay),
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "Gross: ${currencyFormat.format(wageEstimate.grossPay)} • Baseline: ${currencyFormat.format(baselineEstimate.estimatedNetPay)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
+                            )
+                        }
+                        Button(
+                            onClick = onVerifyPayday,
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text("Verify Payday", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
+
+            // Hours Logged Steppers
+            Text(
+                text = "Hours Worked This Cycle (${String.format(Locale.US, "%.1f", wageEstimate.totalHours)}h total):",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+            )
+
+            // Week 1 Hours
+            CashFlowHoursRow(
+                label = "Week 1",
+                hours = wageConfig.week1Hours,
+                onDelta = onAdjustW1
+            )
+
+            // If not weekly, show Week 2 Hours
+            if (paycheckConfig.frequency != PayFrequency.WEEKLY) {
+                CashFlowHoursRow(
+                    label = "Week 2",
+                    hours = wageConfig.week2Hours,
+                    onDelta = onAdjustW2
+                )
+            }
+
+            // Helpful note about baseline decoupling
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surface,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = "Future pay periods on your schedule use your baseline 40h/wk (${currencyFormat.format(baselineEstimate.estimatedNetPay)}) so overtime worked this cycle doesn't inflate future projections.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CashFlowHoursRow(
+    label: String,
+    hours: Double,
+    onDelta: (Double) -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "$label: ${String.format(Locale.US, "%.1f", hours)} hrs",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                    )
+                    if (hours > 40.0) {
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = ColorIncome.copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                text = "+${String.format(Locale.US, "%.1f", hours - 40.0)}h OT",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 10.sp
+                                ),
+                                color = ColorIncome,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+                Text(
+                    text = if (hours > 40.0) "40.0 regular + ${String.format(Locale.US, "%.1f", hours - 40.0)} overtime"
+                    else "${String.format(Locale.US, "%.1f", hours)} regular",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                IconButton(
+                    onClick = { onDelta(-1.0) },
+                    enabled = hours >= 1.0,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(Icons.Default.RemoveCircleOutline, contentDescription = "Decrease 1 hour", modifier = Modifier.size(20.dp))
+                }
+                IconButton(
+                    onClick = { onDelta(1.0) },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(Icons.Default.AddCircleOutline, contentDescription = "Increase 1 hour", modifier = Modifier.size(20.dp))
+                }
+                IconButton(
+                    onClick = { onDelta(5.0) },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.padding(2.dp)
+                    ) {
+                        Text(
+                            text = "+5h",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3. Interactive Due Dates & Paydays Calendar Card
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun CashFlowCalendarCard(
+    bills: List<Bill>,
+    debts: List<Debt>,
+    paycheckConfig: PaycheckConfig,
+    currencyFormat: NumberFormat,
+    onToggleBillPaid: (Bill) -> Unit,
+    onToggleDebtPaid: (Debt) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var displayedMonth by remember { mutableStateOf(YearMonth.now()) }
+    var selectedDay by remember { mutableStateOf<Int?>(LocalDate.now().dayOfMonth) }
+
+    val anchorDate = LocalDate.ofEpochDay(paycheckConfig.anchorPayDateEpochDay)
+    val payDays = remember(displayedMonth, anchorDate, paycheckConfig.frequency) {
+        PaycheckCalculator.getPayDatesForMonth(
+            year = displayedMonth.year,
+            month = displayedMonth.monthValue,
+            anchorPayDate = anchorDate,
+            frequency = paycheckConfig.frequency
+        )
+    }
+
+    val billDays = remember(bills, displayedMonth) {
+        bills.groupBy { it.dueDayOfMonth }
+    }
+    val debtDays = remember(debts, displayedMonth) {
+        debts.filter { it.currentBalance > 0.0 && it.minimumPayment > 0.0 }.groupBy { it.dueDayOfMonth }
+    }
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Header: Month switcher + Legend
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = { displayedMonth = displayedMonth.minusMonths(1) }) {
+                    Icon(Icons.Default.ChevronLeft, contentDescription = "Previous Month")
+                }
+                Text(
+                    text = displayedMonth.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+                IconButton(onClick = { displayedMonth = displayedMonth.plusMonths(1) }) {
+                    Icon(Icons.Default.ChevronRight, contentDescription = "Next Month")
+                }
+            }
+
+            // Legend
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(ColorIncome))
+                    Text("Payday", style = MaterialTheme.typography.labelSmall)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(ColorWarning))
+                    Text("Bills", style = MaterialTheme.typography.labelSmall)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(ColorExpense))
+                    Text("Debts", style = MaterialTheme.typography.labelSmall)
+                }
+            }
+
+            // Weekday Headers
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+                listOf("S", "M", "T", "W", "T", "F", "S").forEach { dayLabel ->
+                    Text(
+                        text = dayLabel,
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.width(36.dp),
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+
+            // Calendar Grid
+            val firstDayOfWeek = displayedMonth.atDay(1).dayOfWeek.value % 7 // Sunday = 0
+            val daysInMonth = displayedMonth.lengthOfMonth()
+            val totalCells = ((firstDayOfWeek + daysInMonth + 6) / 7) * 7
+
+            for (week in 0 until (totalCells / 7)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+                    for (dayOfWeek in 0..6) {
+                        val cellIndex = week * 7 + dayOfWeek
+                        val dayNumber = cellIndex - firstDayOfWeek + 1
+
+                        if (dayNumber in 1..daysInMonth) {
+                            val isPayday = payDays.contains(dayNumber)
+                            val hasBills = billDays.containsKey(dayNumber)
+                            val hasDebts = debtDays.containsKey(dayNumber)
+                            val isSelected = selectedDay == dayNumber
+                            val isToday = displayedMonth == YearMonth.now() && dayNumber == LocalDate.now().dayOfMonth
+
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        when {
+                                            isSelected -> MaterialTheme.colorScheme.primary
+                                            isToday -> MaterialTheme.colorScheme.primaryContainer
+                                            else -> androidx.compose.ui.graphics.Color.Transparent
+                                        }
+                                    )
+                                    .clickable { selectedDay = dayNumber },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        text = "$dayNumber",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontWeight = if (isSelected || isToday || isPayday) FontWeight.Bold else FontWeight.Normal,
+                                            color = when {
+                                                isSelected -> MaterialTheme.colorScheme.onPrimary
+                                                isToday -> MaterialTheme.colorScheme.primary
+                                                else -> MaterialTheme.colorScheme.onSurface
+                                            }
+                                        )
+                                    )
+                                    // Dots row
+                                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        if (isPayday) {
+                                            Box(modifier = Modifier.size(4.dp).clip(CircleShape).background(if (isSelected) MaterialTheme.colorScheme.onPrimary else ColorIncome))
+                                        }
+                                        if (hasBills) {
+                                            Box(modifier = Modifier.size(4.dp).clip(CircleShape).background(if (isSelected) MaterialTheme.colorScheme.onPrimary else ColorWarning))
+                                        }
+                                        if (hasDebts) {
+                                            Box(modifier = Modifier.size(4.dp).clip(CircleShape).background(if (isSelected) MaterialTheme.colorScheme.onPrimary else ColorExpense))
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            Spacer(modifier = Modifier.size(36.dp))
+                        }
+                    }
+                }
+            }
+
+            // Selected Day Details
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+            if (selectedDay != null) {
+                val day = selectedDay!!
+                val isPayday = payDays.contains(day)
+                val dayBills = billDays[day] ?: emptyList()
+                val dayDebts = debtDays[day] ?: emptyList()
+                val totalDue = dayBills.sumOf { it.amount } + dayDebts.sumOf { it.minimumPayment }
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val dateFormatted = displayedMonth.atDay(day)
+                            .format(DateTimeFormatter.ofPattern("EEE, MMM d", Locale.US))
+                        Text(
+                            text = dateFormatted,
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                        )
+                        if (totalDue > 0.0) {
+                            Text(
+                                text = "Total Due: ${currencyFormat.format(totalDue)}",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = ColorExpense
+                            )
+                        }
+                    }
+
+                    if (isPayday) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = ColorIncome.copy(alpha = 0.15f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(Icons.Default.MonetizationOn, contentDescription = null, tint = ColorIncome, modifier = Modifier.size(20.dp))
+                                Column {
+                                    Text(
+                                        text = "Payday Estimated Deposit",
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                        color = ColorIncome
+                                    )
+                                    Text(
+                                        text = "${currencyFormat.format(paycheckConfig.typicalTakeHomePay)} (${paycheckConfig.frequency.displayName})",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (dayBills.isEmpty() && dayDebts.isEmpty() && !isPayday) {
+                        Text(
+                            text = "No bills or debt payments scheduled for this date.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                    }
+
+                    dayBills.forEach { bill ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surface)
+                                .clickable { onToggleBillPaid(bill) }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (bill.isPaidThisMonth) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                    contentDescription = null,
+                                    tint = if (bill.isPaidThisMonth) ColorIncome else MaterialTheme.colorScheme.outline,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Column {
+                                    Text(
+                                        text = bill.name,
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            textDecoration = if (bill.isPaidThisMonth) TextDecoration.LineThrough else TextDecoration.None
+                                        )
+                                    )
+                                    Text(
+                                        text = "Bill • ${bill.category}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.outline
+                                    )
+                                }
+                            }
+                            Text(
+                                text = currencyFormat.format(bill.amount),
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+
+                    dayDebts.forEach { debt ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surface)
+                                .clickable { onToggleDebtPaid(debt) }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (debt.isPaidThisMonth) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                    contentDescription = null,
+                                    tint = if (debt.isPaidThisMonth) ColorIncome else MaterialTheme.colorScheme.outline,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Column {
+                                    Text(
+                                        text = debt.name,
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            textDecoration = if (debt.isPaidThisMonth) TextDecoration.LineThrough else TextDecoration.None
+                                        )
+                                    )
+                                    Text(
+                                        text = "Debt Min • ${debt.type.name.replace('_', ' ').lowercase()}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.outline
+                                    )
+                                }
+                            }
+                            Text(
+                                text = currencyFormat.format(debt.minimumPayment),
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. Paycheck Cushion & Forward Schedule
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun CashFlowPaycheckPlannerCard(
+    breakdown: PaycheckBreakdown,
+    config: PaycheckConfig,
+    currencyFormat: NumberFormat,
+    onEditPaycheck: () -> Unit,
+    onToggleObligationPaid: (UpcomingObligationItem) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val dtf = DateTimeFormatter.ofPattern("EEE, MMM d", Locale.US)
+    val nextPayDateStr = breakdown.followingPayDate.format(dtf)
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Text(
+                        text = "Paycheck Allocation",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+                IconButton(onClick = onEditPaycheck) {
+                    Icon(Icons.Default.Settings, contentDescription = "Edit Schedule", tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+
+            // Cash Needed vs Steady Target
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = "Cash Needed This Check",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = currencyFormat.format(breakdown.windowObligationsTotal),
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "Bills: ${currencyFormat.format(breakdown.windowBillsTotal)} • Debts: ${currencyFormat.format(breakdown.windowDebtsTotal)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
+                        )
+                    }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = "Steady Fixed Reserve",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = currencyFormat.format(breakdown.perPaycheckReserve),
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        Text(
+                            text = "Equalized savings per check",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
+                        )
+                    }
+                }
+            }
+
+            // Due this pay cycle checklist
+            if (breakdown.obligationsDueInPeriod.isNotEmpty()) {
+                Text(
+                    text = "Due This Pay Cycle (${breakdown.obligationsDueInPeriod.size}):",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    breakdown.obligationsDueInPeriod.forEach { item ->
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.weight(1f, fill = false)
+                                ) {
+                                    Checkbox(
+                                        checked = item.isPaid,
+                                        onCheckedChange = { onToggleObligationPaid(item) },
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Column {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                text = item.name,
+                                                style = MaterialTheme.typography.bodyMedium.copy(
+                                                    fontWeight = FontWeight.Medium,
+                                                    textDecoration = if (item.isPaid) TextDecoration.LineThrough else null
+                                                )
+                                            )
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = if (item.type == ObligationType.BILL) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                                                else MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
+                                            ) {
+                                                Text(
+                                                    text = if (item.type == ObligationType.BILL) "BILL" else "DEBT",
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.sp),
+                                                    color = if (item.type == ObligationType.BILL) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = "Due ${item.dueDate.format(dtf)} • ${item.subtitle}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = currencyFormat.format(item.amount),
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Forward Paycheck Schedule Projection (Decoupled: Period 1 = Current Hours, Periods 2+ = Baseline)
+            if (breakdown.upcomingPayPeriods.size > 1) {
+                Text(
+                    text = "Forward Paycheck Schedule (Next 3 Paydays):",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    breakdown.upcomingPayPeriods.forEach { period ->
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (period.isCurrentPeriod) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(
+                                    text = if (period.isCurrentPeriod) "Pay #1 (Upcoming)" else "Pay #${period.periodIndex}",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = if (period.isCurrentPeriod) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = period.payDate.format(dtf),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Pay: ${currencyFormat.format(period.projectedTakeHomePay)}",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (period.isCurrentPeriod) "(Current Hours)" else "(Baseline 40h)",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                    color = MaterialTheme.colorScheme.outline
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "${currencyFormat.format(period.totalObligations)} due",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = ColorExpense
+                                )
+                                Text(
+                                    text = "${currencyFormat.format(period.safeToSpend)} safe",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = ColorIncome
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3-Paycheck Bonus Months Callout (for bi-weekly schedules)
+            if (breakdown.threePaycheckMonths.isNotEmpty()) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.7f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CalendarMonth,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Column {
+                            Text(
+                                text = "3-Paycheck Bonus Months: ${breakdown.threePaycheckMonths.joinToString(", ")}",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                            Text(
+                                text = "On these months you receive an extra paycheck that has zero fixed obligations assigned to it! Pure surplus for savings or debt payoff.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dialogs: Edit Paycheck, Edit Wage, Verify Payday
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun CashFlowEditPaycheckDialog(
+    currentConfig: PaycheckConfig,
+    onDismiss: () -> Unit,
+    onSave: (PaycheckConfig) -> Unit
+) {
+    var selectedFrequency by remember { mutableStateOf(currentConfig.frequency) }
+    var takeHomeText by remember { mutableStateOf(currentConfig.typicalTakeHomePay.toString()) }
+    var anchorPayDate by remember { mutableStateOf(LocalDate.ofEpochDay(currentConfig.anchorPayDateEpochDay)) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Pay Schedule Settings") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Configure how often you get paid and an anchor pay date to calculate upcoming paydays and bill cycles.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Text("Pay Frequency:", style = MaterialTheme.typography.labelMedium)
+                PayFrequency.values().forEach { freq ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { selectedFrequency = freq }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = selectedFrequency == freq,
+                            onClick = { selectedFrequency = freq }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(freq.displayName, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+
+                OutlinedTextField(
+                    value = takeHomeText,
+                    onValueChange = { takeHomeText = it },
+                    label = { Text("Baseline Take-Home Pay ($)") },
+                    placeholder = { Text("1800.00") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Text(
+                    text = "Anchor Payday: ${anchorDateDisplay(anchorPayDate)}",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { anchorPayDate = anchorPayDate.minusDays(if (selectedFrequency == PayFrequency.WEEKLY) 7 else 14) },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("-1 Cycle")
+                    }
+                    OutlinedButton(
+                        onClick = { anchorPayDate = anchorPayDate.plusDays(if (selectedFrequency == PayFrequency.WEEKLY) 7 else 14) },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("+1 Cycle")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val pay = takeHomeText.toDoubleOrNull() ?: currentConfig.typicalTakeHomePay
+                    onSave(
+                        currentConfig.copy(
+                            frequency = selectedFrequency,
+                            typicalTakeHomePay = pay,
+                            anchorPayDateEpochDay = anchorPayDate.toEpochDay()
+                        )
+                    )
+                }
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun CashFlowEditWageDialog(
+    currentConfig: WageConfig,
+    frequency: PayFrequency,
+    onDismiss: () -> Unit,
+    onSave: (WageConfig) -> Unit
+) {
+    var hourlyWageText by remember { mutableStateOf(currentConfig.hourlyWage.toString()) }
+    var otMultiplierText by remember { mutableStateOf(currentConfig.overtimeMultiplier.toString()) }
+    var deductionsPercentText by remember {
+        mutableStateOf(String.format(Locale.US, "%.1f", currentConfig.estimatedDeductionPercent))
+    }
+    var standardHoursText by remember { mutableStateOf(currentConfig.standardWeeklyHours.toString()) }
+    var week1Text by remember { mutableStateOf(currentConfig.week1Hours.toString()) }
+    var week2Text by remember { mutableStateOf(currentConfig.week2Hours.toString()) }
+    var autoSync by remember { mutableStateOf(currentConfig.autoSyncPaycheckPlanner) }
+
+    val isValid = (hourlyWageText.toDoubleOrNull() ?: -1.0) >= 0.0 &&
+            (otMultiplierText.toDoubleOrNull() ?: -1.0) >= 1.0 &&
+            (deductionsPercentText.toDoubleOrNull() ?: -1.0) in 0.0..100.0 &&
+            (standardHoursText.toDoubleOrNull() ?: -1.0) >= 0.0 &&
+            (week1Text.toDoubleOrNull() ?: -1.0) >= 0.0 &&
+            (week2Text.toDoubleOrNull() ?: -1.0) >= 0.0
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Wage & Hours Settings") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Configure your hourly pay and baseline hours to estimate current and future paychecks.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = hourlyWageText,
+                        onValueChange = { hourlyWageText = it },
+                        label = { Text("Hourly Wage ($)") },
+                        placeholder = { Text("25.00") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    OutlinedTextField(
+                        value = otMultiplierText,
+                        onValueChange = { otMultiplierText = it },
+                        label = { Text("OT Multiplier") },
+                        placeholder = { Text("1.5") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                OutlinedTextField(
+                    value = deductionsPercentText,
+                    onValueChange = { deductionsPercentText = it },
+                    label = { Text("Est. Deductions & Taxes (%)") },
+                    placeholder = { Text("18.0") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = standardHoursText,
+                    onValueChange = { standardHoursText = it },
+                    label = { Text("Standard Baseline Hours/Week") },
+                    placeholder = { Text("40.0") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = "Baseline hours are used for all future pay periods so single-week overtime does not inflate future forecasts.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline
+                )
+
+                Text(
+                    text = "Logged Hours This Period:",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = week1Text,
+                        onValueChange = { week1Text = it },
+                        label = { Text("Week 1 Hours") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    if (frequency != PayFrequency.WEEKLY) {
+                        OutlinedTextField(
+                            value = week2Text,
+                            onValueChange = { week2Text = it },
+                            label = { Text("Week 2 Hours") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(checked = autoSync, onCheckedChange = { autoSync = it })
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Sync hours estimate with Paycheck Planner",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val wage = hourlyWageText.toDoubleOrNull() ?: currentConfig.hourlyWage
+                    val ot = otMultiplierText.toDoubleOrNull() ?: currentConfig.overtimeMultiplier
+                    val ded = deductionsPercentText.toDoubleOrNull() ?: currentConfig.estimatedDeductionPercent
+                    val std = standardHoursText.toDoubleOrNull() ?: currentConfig.standardWeeklyHours
+                    val w1 = week1Text.toDoubleOrNull() ?: currentConfig.week1Hours
+                    val w2 = week2Text.toDoubleOrNull() ?: currentConfig.week2Hours
+
+                    onSave(
+                        currentConfig.copy(
+                            hourlyWage = wage,
+                            overtimeMultiplier = ot,
+                            estimatedDeductionPercent = ded,
+                            standardWeeklyHours = std,
+                            week1Hours = w1,
+                            week2Hours = w2,
+                            autoSyncPaycheckPlanner = autoSync
+                        )
+                    )
+                },
+                enabled = isValid
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun CashFlowVerifyPaydayDialog(
+    estimatedNet: Double,
+    currencyFormat: NumberFormat,
+    onDismiss: () -> Unit,
+    onConfirm: (Double) -> Unit
+) {
+    var actualPayText by remember {
+        mutableStateOf(String.format(Locale.US, "%.2f", estimatedNet))
+    }
+
+    val isValid = (actualPayText.toDoubleOrNull() ?: -1.0) > 0.0
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Verify Actual Payday Deposit") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Did your paycheck post to your bank? Confirm the exact net take-home deposit to lock it into your cash flow planner.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Text(
+                    text = "Estimated Net: ${currencyFormat.format(estimatedNet)}",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                )
+
+                OutlinedTextField(
+                    value = actualPayText,
+                    onValueChange = { actualPayText = it },
+                    label = { Text("Actual Net Deposit ($)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val actual = actualPayText.toDoubleOrNull() ?: estimatedNet
+                    onConfirm(actual)
+                },
+                enabled = isValid
+            ) {
+                Text("Verify & Lock")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+private fun anchorDateDisplay(date: LocalDate): String {
+    return date.format(DateTimeFormatter.ofPattern("EEE, MMM d, yyyy", Locale.US))
+}

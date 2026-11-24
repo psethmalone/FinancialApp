@@ -126,17 +126,47 @@ class DebtsViewModel @Inject constructor(
             initialValue = WageCalculator.calculateEstimate(WageConfig())
         )
 
+    val baselineWageEstimate: StateFlow<WageEstimate> =
+        combine(wageConfig, paycheckConfig) { wage, payConfig ->
+            WageCalculator.calculateBaselineEstimate(wage, payConfig.frequency)
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = WageCalculator.calculateBaselineEstimate(WageConfig())
+        )
+
     // ── Paycheck Cushion & Allocator ───────────────────────────────────────────
 
     val paycheckBreakdown: StateFlow<PaycheckBreakdown> =
-        combine(bills, debts, paycheckConfig, wageEstimate, wageConfig) { billList, debtList, config, wageEst, wageCfg ->
-            val effectiveTakeHome = if (wageCfg.autoSyncPaycheckPlanner) {
+        combine(bills, debts, paycheckConfig, wageEstimate, baselineWageEstimate, wageConfig) { args ->
+            @Suppress("UNCHECKED_CAST")
+            val billList = args[0] as List<Bill>
+            @Suppress("UNCHECKED_CAST")
+            val debtList = args[1] as List<Debt>
+            val config = args[2] as PaycheckConfig
+            val wageEst = args[3] as WageEstimate
+            val baseWageEst = args[4] as WageEstimate
+            val wageCfg = args[5] as WageConfig
+
+            val currentTakeHome = if (wageCfg.autoSyncPaycheckPlanner) {
                 wageEst.effectiveTakeHomePay
             } else {
                 config.typicalTakeHomePay
             }
-            val effectiveConfig = config.copy(typicalTakeHomePay = effectiveTakeHome)
-            PaycheckCalculator.calculateBreakdown(billList, debtList, effectiveConfig)
+            val baselineTakeHome = if (wageCfg.autoSyncPaycheckPlanner) {
+                baseWageEst.effectiveTakeHomePay
+            } else {
+                config.typicalTakeHomePay
+            }
+            PaycheckCalculator.calculateBreakdown(
+                bills = billList,
+                debts = debtList,
+                config = config,
+                currentTakeHomePay = currentTakeHome,
+                baselineTakeHomePay = baselineTakeHome,
+                isCurrentPeriodOvertime = wageEst.overtimeHours > 0.0,
+                currentPeriodOvertimeHours = wageEst.overtimeHours
+            )
         }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),

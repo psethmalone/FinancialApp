@@ -37,6 +37,7 @@ class FinanceNotificationListenerService : NotificationListenerService() {
     interface ServiceEntryPoint {
         fun logRepository(): NotificationLogRepository
         fun portfolioRepository(): com.example.financehome.data.repository.PortfolioRepository
+        fun filterRepository(): com.example.financehome.data.repository.NotificationFilterRepository
     }
 
     private val serviceJob = SupervisorJob()
@@ -65,15 +66,48 @@ class FinanceNotificationListenerService : NotificationListenerService() {
         val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
         val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
 
-        val logRepo = try {
-            val entryPoint = EntryPointAccessors.fromApplication(
+        val entryPoint = try {
+            EntryPointAccessors.fromApplication(
                 applicationContext,
                 ServiceEntryPoint::class.java
             )
-            entryPoint.logRepository()
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to get logRepository", e)
+            Log.e(TAG, "Failed to get ServiceEntryPoint", e)
             null
+        }
+
+        val logRepo = entryPoint?.logRepository()
+        val filterRepo = entryPoint?.filterRepository()
+
+        // 0. Filter check: Ensure the app is in user's monitored list
+        if (filterRepo != null) {
+            val config = filterRepo.config.value
+            val isSms = filterRepo.isSmsApp(packageName)
+
+            if (!filterRepo.isPackageMonitored(packageName)) {
+                // If not explicitly monitored and not a known bank/sms app in defaults, skip
+                return
+            }
+
+            // If it's an SMS/text messaging app, apply smart bank text filtering
+            if (isSms) {
+                if (!config.isSmsEnabled) return
+
+                val combinedText = listOfNotNull(title, text, bigText).joinToString(" ")
+
+                if (config.requireDollarSignForSms && !combinedText.contains("$")) {
+                    return
+                }
+
+                // Must match at least one bank/financial keyword to avoid personal text messages
+                val hasBankKeyword = config.smsKeywords.any { keyword ->
+                    combinedText.contains(keyword, ignoreCase = true)
+                }
+
+                if (!hasBankKeyword) {
+                    return
+                }
+            }
         }
 
         // 1. Check for Fidelity / Brokerage trade execution alerts
