@@ -10,10 +10,14 @@ import com.example.financehome.data.model.DownloadState
 import com.example.financehome.data.repository.AppUpdateRepository
 import com.example.financehome.data.repository.DebtRepository
 import com.example.financehome.data.repository.TransactionRepository
+import com.example.financehome.domain.AnalyticsEngine
+import com.example.financehome.domain.AnalyticsPeriod
+import com.example.financehome.domain.AnalyticsReport
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -31,6 +35,23 @@ class DashboardViewModel @Inject constructor(
     val availableUpdate = MutableStateFlow<AppUpdateInfo?>(null)
     val downloadState = MutableStateFlow<DownloadState>(DownloadState.Idle)
     val showUpdateDialog = MutableStateFlow(false)
+
+    // Analytics state
+    private val _selectedPeriod = MutableStateFlow(AnalyticsPeriod.THIS_MONTH)
+    val selectedPeriod: StateFlow<AnalyticsPeriod> = _selectedPeriod.asStateFlow()
+
+    fun setAnalyticsPeriod(period: AnalyticsPeriod) {
+        _selectedPeriod.value = period
+    }
+
+    val analyticsReport: StateFlow<AnalyticsReport> =
+        combine(transactionRepo.getAllTransactions(), _selectedPeriod) { transactions, period ->
+            AnalyticsEngine.generateReport(transactions, period)
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = AnalyticsEngine.generateReport(emptyList(), AnalyticsPeriod.THIS_MONTH)
+        )
 
     init {
         checkUpdatesOnStartup()

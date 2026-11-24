@@ -11,19 +11,19 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.financehome.data.local.CategoryTotal
 import com.example.financehome.data.model.Transaction
 import com.example.financehome.data.model.TransactionType
+import com.example.financehome.ui.analytics.AnalyticsScreen
 import com.example.financehome.ui.theme.ColorExpense
 import com.example.financehome.ui.theme.ColorIncome
 import com.example.financehome.ui.update.UpdateDialog
@@ -33,6 +33,11 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+
+enum class DashboardTab(val label: String, val icon: ImageVector) {
+    OVERVIEW("Overview", Icons.Default.Dashboard),
+    ANALYTICS("Charts & Trends", Icons.Default.PieChart)
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,12 +49,15 @@ fun DashboardScreen(
     onNavigateToSwipeCategorize: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var selectedDashboardTab by remember { mutableStateOf(DashboardTab.OVERVIEW) }
+
     val uncategorizedCount by viewModel.uncategorizedCount.collectAsState()
     val recentTransactions by viewModel.recentTransactions.collectAsState()
     val monthlySpend by viewModel.monthlySpendTotal.collectAsState()
     val categoryTotals by viewModel.categoryTotals.collectAsState()
     val totalDebt by viewModel.totalDebt.collectAsState()
     val netPosition by viewModel.netPosition.collectAsState()
+    val analyticsReport by viewModel.analyticsReport.collectAsState()
 
     val availableUpdate by viewModel.availableUpdate.collectAsState()
     val downloadState by viewModel.downloadState.collectAsState()
@@ -70,14 +78,17 @@ fun DashboardScreen(
         },
         modifier = modifier
     ) { innerPadding ->
-        LazyColumn(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            item {
+            // Pinned top section: App Header, Update Banner, and Segmented Tabs
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            ) {
                 Spacer(modifier = Modifier.height(8.dp))
                 // App Header
                 Column {
@@ -94,11 +105,10 @@ fun DashboardScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-            }
 
-            // App Update Available Banner
-            if (availableUpdate != null) {
-                item {
+                // App Update Available Banner
+                if (availableUpdate != null) {
+                    Spacer(modifier = Modifier.height(10.dp))
                     Card(
                         onClick = { viewModel.openUpdateDialog() },
                         modifier = Modifier.fillMaxWidth(),
@@ -157,292 +167,352 @@ fun DashboardScreen(
                         }
                     }
                 }
-            }
 
-            // Swipe to Categorize Card (shown if there are uncategorized transactions)
-            if (uncategorizedCount > 0) {
-                item {
-                    Card(
-                        onClick = onNavigateToSwipeCategorize,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.tertiaryContainer
-                        )
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(42.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.tertiary),
-                                    contentAlignment = Alignment.Center
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Segmented Tab Switcher: Overview vs Charts & Trends
+                TabRow(
+                    selectedTabIndex = selectedDashboardTab.ordinal,
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    contentColor = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                ) {
+                    DashboardTab.values().forEach { tab ->
+                        Tab(
+                            selected = selectedDashboardTab == tab,
+                            onClick = { selectedDashboardTab = tab },
+                            text = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    Icon(
-                                        Icons.Filled.Check,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onTertiary,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                }
-                                Column {
+                                    Icon(tab.icon, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Text(
-                                        text = "$uncategorizedCount to categorize",
-                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.onTertiaryContainer
-                                    )
-                                    Text(
-                                        text = "Swipe into Needs vs. Wants in seconds →",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f)
+                                        text = tab.label,
+                                        fontWeight = if (selectedDashboardTab == tab) FontWeight.Bold else FontWeight.Normal
                                     )
                                 }
                             }
-                            Icon(
-                                Icons.Filled.ChevronRight,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onTertiaryContainer
-                            )
-                        }
+                        )
                     }
                 }
+
+                Spacer(modifier = Modifier.height(12.dp))
             }
 
-            // Net Position Card
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    )
-                ) {
-                    Column(
+            // Tab Content
+            when (selectedDashboardTab) {
+                DashboardTab.OVERVIEW -> {
+                    LazyColumn(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(20.dp)
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        Text(
-                            text = "Net Cash & Debt Position",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = currencyFormat.format(netPosition),
-                            style = MaterialTheme.typography.headlineLarge.copy(
-                                fontWeight = FontWeight.ExtraBold,
-                                color = if (netPosition >= 0) ColorIncome else ColorExpense
-                            )
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (netPosition >= 0) Icons.Default.TrendingUp else Icons.Default.TrendingDown,
-                                contentDescription = null,
-                                tint = if (netPosition >= 0) ColorIncome else ColorExpense,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Text(
-                                text = if (netPosition >= 0) "Cash deposits exceed tracked debt" else "Outstanding debts exceed cash",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
+                        // Swipe to Categorize Card (shown if there are uncategorized transactions)
+                        if (uncategorizedCount > 0) {
+                            item {
+                                Card(
+                                    onClick = onNavigateToSwipeCategorize,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                                    )
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(16.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(42.dp)
+                                                    .clip(CircleShape)
+                                                    .background(MaterialTheme.colorScheme.tertiary),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    Icons.Filled.Check,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.onTertiary,
+                                                    modifier = Modifier.size(22.dp)
+                                                )
+                                            }
+                                            Column {
+                                                Text(
+                                                    text = "$uncategorizedCount to categorize",
+                                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                                                )
+                                                Text(
+                                                    text = "Swipe into Needs vs. Wants in seconds →",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f)
+                                                )
+                                            }
+                                        }
+                                        Icon(
+                                            Icons.Filled.ChevronRight,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onTertiaryContainer
+                                        )
+                                    }
+                                }
+                            }
                         }
-                    }
-                }
-            }
 
-            // Quick Stats Row: Spending vs Debt
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // Monthly Spending Card
-                    Card(
-                        modifier = Modifier
-                            .weight(1f),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant
-                        ),
-                        onClick = onNavigateToTransactions
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
+                        // Net Position Card
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(20.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                                )
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(20.dp)
+                                ) {
+                                    Text(
+                                        text = "Net Cash & Debt Position",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = currencyFormat.format(netPosition),
+                                        style = MaterialTheme.typography.headlineLarge.copy(
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = if (netPosition >= 0) ColorIncome else ColorExpense
+                                        )
+                                    )
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (netPosition >= 0) Icons.Default.TrendingUp else Icons.Default.TrendingDown,
+                                            contentDescription = null,
+                                            tint = if (netPosition >= 0) ColorIncome else ColorExpense,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            text = if (netPosition >= 0) "Cash deposits exceed tracked debt" else "Outstanding debts exceed cash",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Quick Stats Row: Spending vs Debt
+                        item {
                             Row(
-                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                // Monthly Spending Card (tapping switches to Charts & Trends)
+                                Card(
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                    ),
+                                    onClick = { selectedDashboardTab = DashboardTab.ANALYTICS }
+                                ) {
+                                    Column(modifier = Modifier.padding(16.dp)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Text(
+                                                text = "This Month",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Icon(
+                                                Icons.Default.PieChart,
+                                                contentDescription = "View charts",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = currencyFormat.format(monthlySpend),
+                                            style = MaterialTheme.typography.titleLarge.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        )
+                                        Text(
+                                            text = "Tap for charts →",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+
+                                // Total Debt Card
+                                Card(
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                    ),
+                                    onClick = onNavigateToDebts
+                                ) {
+                                    Column(modifier = Modifier.padding(16.dp)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Text(
+                                                text = "Total Debt",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Icon(
+                                                Icons.Default.CreditCard,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = currencyFormat.format(totalDebt),
+                                            style = MaterialTheme.typography.titleLarge.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (totalDebt > 0) ColorExpense else ColorIncome
+                                            )
+                                        )
+                                        Text(
+                                            text = "Active balances",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Top Spending Categories
+                        if (categoryTotals.isNotEmpty()) {
+                            item {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Top Spending Categories",
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                    )
+                                    TextButton(onClick = { selectedDashboardTab = DashboardTab.ANALYTICS }) {
+                                        Text("See Charts")
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    items(categoryTotals.take(5)) { cat ->
+                                        CategoryChip(categoryTotal = cat, currencyFormat = currencyFormat)
+                                    }
+                                }
+                            }
+                        }
+
+                        // Recent Transactions Section Header
+                        item {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth()
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "This Month",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    text = "Recent Activity",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                                 )
-                                Icon(
-                                    Icons.Default.ArrowDownward,
-                                    contentDescription = null,
-                                    tint = ColorExpense,
-                                    modifier = Modifier.size(16.dp)
-                                )
+                                TextButton(onClick = onNavigateToTransactions) {
+                                    Text("See All")
+                                }
                             }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = currencyFormat.format(monthlySpend),
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            )
-                            Text(
-                                text = "Total spent",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
                         }
-                    }
 
-                    // Total Debt Card
-                    Card(
-                        modifier = Modifier
-                            .weight(1f),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant
-                        ),
-                        onClick = onNavigateToDebts
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    text = "Total Debt",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Icon(
-                                    Icons.Default.CreditCard,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(16.dp)
-                                )
+                        // Recent Transactions List
+                        if (recentTransactions.isEmpty()) {
+                            item {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                    )
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(24.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Icon(
+                                            Icons.Default.NotificationsActive,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(36.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(
+                                            text = "No transactions detected yet",
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "Transactions from Cash App, Ally, and other banks will appear here automatically when notifications arrive.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                        )
+                                    }
+                                }
                             }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = currencyFormat.format(totalDebt),
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (totalDebt > 0) ColorExpense else ColorIncome
-                                )
-                            )
-                            Text(
-                                text = "Active balances",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        } else {
+                            items(recentTransactions, key = { it.id }) { transaction ->
+                                TransactionItemRow(transaction = transaction, currencyFormat = currencyFormat)
+                            }
+                        }
+
+                        item {
+                            Spacer(modifier = Modifier.height(80.dp))
                         }
                     }
                 }
-            }
-
-            // Top Spending Categories
-            if (categoryTotals.isNotEmpty()) {
-                item {
-                    Text(
-                        text = "Top Spending Categories",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                DashboardTab.ANALYTICS -> {
+                    AnalyticsScreen(
+                        report = analyticsReport,
+                        onSelectPeriod = { viewModel.setAnalyticsPeriod(it) },
+                        currencyFormat = currencyFormat,
+                        modifier = Modifier.fillMaxSize()
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(categoryTotals.take(5)) { cat ->
-                            CategoryChip(categoryTotal = cat, currencyFormat = currencyFormat)
-                        }
-                    }
                 }
-            }
-
-            // Recent Transactions Section Header
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Recent Activity",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                    )
-                    TextButton(onClick = onNavigateToTransactions) {
-                        Text("See All")
-                    }
-                }
-            }
-
-            // Recent Transactions List
-            if (recentTransactions.isEmpty()) {
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                        )
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Icon(
-                                Icons.Default.NotificationsActive,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(36.dp)
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "No transactions detected yet",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Transactions from Cash App, Ally, and other banks will appear here automatically when notifications arrive.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                            )
-                        }
-                    }
-                }
-            } else {
-                items(recentTransactions, key = { it.id }) { transaction ->
-                    TransactionItemRow(transaction = transaction, currencyFormat = currencyFormat)
-                }
-            }
-
-            item {
-                Spacer(modifier = Modifier.height(80.dp))
             }
         }
     }
