@@ -4,7 +4,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.financehome.data.model.Transaction
 import com.example.financehome.data.model.TransactionType
+import com.example.financehome.data.model.PortfolioHolding
+import com.example.financehome.data.model.PortfolioTrade
+import com.example.financehome.data.model.TradeAction
+import com.example.financehome.data.model.TradeSource
+import com.example.financehome.data.repository.HoldingPerformance
 import com.example.financehome.data.repository.MarketDataRepository
+import com.example.financehome.data.repository.PortfolioRepository
+import com.example.financehome.data.repository.PortfolioSummary
 import com.example.financehome.data.repository.TransactionRepository
 import com.example.financehome.domain.InvestmentProjector
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -43,8 +50,72 @@ data class AssetOption(
 @HiltViewModel
 class OpportunityViewModel @Inject constructor(
     private val transactionRepo: TransactionRepository,
-    private val marketDataRepo: MarketDataRepository
+    private val marketDataRepo: MarketDataRepository,
+    private val portfolioRepo: PortfolioRepository
 ) : ViewModel() {
+
+    // ── Real Portfolio ─────────────────────────────────────────────────────────
+
+    val rawHoldings: StateFlow<List<PortfolioHolding>> =
+        portfolioRepo.holdings
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = emptyList()
+            )
+
+    val portfolioTrades: StateFlow<List<PortfolioTrade>> =
+        portfolioRepo.trades
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = emptyList()
+            )
+
+    val isRefreshingPortfolio = MutableStateFlow(false)
+
+    // Map of live prices: Ticker -> Price
+    private val livePrices = MutableStateFlow<Map<String, Double>>(emptyMap())
+
+    val portfolioHoldings: StateFlow<List<HoldingPerformance>> =
+        combine(rawHoldings, livePrices) { holdingsList, priceMap ->
+            holdingsList.filter { it.totalShares > 0.0 }.map { h ->
+                val price = priceMap[h.ticker] ?: h.averageBuyPrice
+                val marketVal = h.totalShares * price
+                val gainLoss = marketVal - h.totalCostBasis
+                val gainLossPct = if (h.totalCostBasis > 0.0) (gainLoss / h.totalCostBasis) * 100.0 else 0.0
+                HoldingPerformance(
+                    holding = h,
+                    currentPrice = price,
+                    currentMarketValue = marketVal,
+                    totalGainLoss = gainLoss,
+                    totalGainLossPercent = gainLossPct
+                )
+            }
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    val portfolioSummary: StateFlow<PortfolioSummary> =
+        portfolioHoldings.map { list ->
+            val totalMarket = list.sumOf { it.currentMarketValue }
+            val totalCost = list.sumOf { it.holding.totalCostBasis }
+            val totalGain = totalMarket - totalCost
+            val totalPct = if (totalCost > 0.0) (totalGain / totalCost) * 100.0 else 0.0
+            PortfolioSummary(
+                totalMarketValue = totalMarket,
+                totalCostBasis = totalCost,
+                totalGainLoss = totalGain,
+                totalGainLossPercent = totalPct,
+                holdingsCount = list.size
+            )
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = PortfolioSummary(0.0, 0.0, 0.0, 0.0, 0)
+        )
 
     // Preset list of popular index funds and stocks
     val defaultAssets = listOf(
@@ -236,6 +307,63 @@ class OpportunityViewModel @Inject constructor(
                 phantomItems.value = items
                 isRefreshingPrices.value = false
             }
+        }
+    }
+
+    // ── Real Portfolio Actions ─────────────────────────────────────────────────
+
+    fun refreshPortfolioPrices(holdingsToRefresh: List<PortfolioHolding> = rawHoldings.value) {
+        if (holdingsToRefresh.isEmpty()) return
+        viewModelScope.launch {
+            isRefreshingPortfolio.value = true
+            withContext(Dispatchers.IO) {
+                val map = mutableMapOf<String, Double>()
+                for (h in holdingsToRefresh) {
+                    val price = marketDataRepo.getCurrentPrice(h.ticker) ?: h.averageBuyPrice
+                    map[h.ticker] = price
+                }
+                livePrices.value = map
+                isRefreshingPortfolio.value = false
+            }
+        }
+    }
+
+    fun addManualTrade(
+        ticker: String,
+        action: TradeAction,
+        shares: Double,
+        pricePerShare: Double,
+        notes: String? = null
+    ) {
+        viewModelScope.launch {
+            portfolioRepo.recordTrade(
+                ticker = ticker,
+                action = action,
+                shares = shares,
+                pricePerShare = pricePerShare,
+                source = TradeSource.MANUAL,
+                notes = notes
+            )
+            refreshPortfolioPrices()
+        }
+    }
+
+    fun setManualHolding(ticker: String, shares: Double, averageCost: Double) {
+        viewModelScope.launch {
+            portfolioRepo.setHolding(ticker, shares, averageCost)
+            refreshPortfolioPrices()
+        }
+    }
+
+    fun deleteTrade(trade: PortfolioTrade) {
+        viewModelScope.launch {
+            portfolioRepo.deleteTrade(trade)
+        }
+    }
+
+    fun deleteHolding(holding: PortfolioHolding) {
+        viewModelScope.launch {
+            portfolioRepo.deleteHolding(holding)
         }
     }
 }

@@ -26,6 +26,7 @@ class FinanceNotificationListenerService : NotificationListenerService() {
     @InstallIn(SingletonComponent::class)
     interface ServiceEntryPoint {
         fun logRepository(): NotificationLogRepository
+        fun portfolioRepository(): com.example.financehome.data.repository.PortfolioRepository
     }
 
     private val serviceJob = SupervisorJob()
@@ -54,9 +55,6 @@ class FinanceNotificationListenerService : NotificationListenerService() {
         val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
         val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
 
-        val parsed = parser.parse(packageName, title, text, bigText, subText)
-        val combinedSummary = listOfNotNull(title, text, bigText).filter { it.isNotBlank() }.joinToString(" - ")
-
         val logRepo = try {
             val entryPoint = EntryPointAccessors.fromApplication(
                 applicationContext,
@@ -68,13 +66,41 @@ class FinanceNotificationListenerService : NotificationListenerService() {
             null
         }
 
+        // 1. Check for Fidelity / Brokerage trade execution alerts
+        val brokerageTrade = parser.parseBrokerageTrade(packageName, title, text, bigText, subText)
+        if (brokerageTrade != null) {
+            logRepo?.logEvent(
+                packageName = packageName,
+                summaryText = "Trade: ${brokerageTrade.action} ${brokerageTrade.shares} ${brokerageTrade.ticker} @ $${brokerageTrade.pricePerShare}",
+                status = "Parsed Fidelity/Brokerage Trade",
+                isSuccess = true
+            )
+            serviceScope.launch {
+                try {
+                    val entryPoint = EntryPointAccessors.fromApplication(
+                        applicationContext,
+                        ServiceEntryPoint::class.java
+                    )
+                    entryPoint.portfolioRepository().recordBrokerageNotificationTrade(brokerageTrade)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to persist brokerage trade", e)
+                }
+            }
+            return
+        }
+
+        // 2. Standard banking transaction parsing
+        val parsed = parser.parse(packageName, title, text, bigText, subText)
+        val combinedSummary = listOfNotNull(title, text, bigText).filter { it.isNotBlank() }.joinToString(" - ")
+
         if (parsed == null) {
-            // Only log if it might be a financial or banking app
+            // Only log if it might be a financial, brokerage, or banking app
             if (packageName.contains("cash", ignoreCase = true) ||
                 packageName.contains("ally", ignoreCase = true) ||
                 packageName.contains("bank", ignoreCase = true) ||
                 packageName.contains("pay", ignoreCase = true) ||
                 packageName.contains("chase", ignoreCase = true) ||
+                packageName.contains("fidelity", ignoreCase = true) ||
                 combinedSummary.contains("$")
             ) {
                 logRepo?.logEvent(

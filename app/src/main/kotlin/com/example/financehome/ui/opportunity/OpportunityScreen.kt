@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -19,9 +20,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.financehome.data.model.PortfolioHolding
+import com.example.financehome.data.model.PortfolioTrade
+import com.example.financehome.data.model.TradeAction
+import com.example.financehome.data.model.TradeSource
+import com.example.financehome.data.repository.HoldingPerformance
+import com.example.financehome.data.repository.PortfolioSummary
 import com.example.financehome.ui.dashboard.formatTimestamp
 import com.example.financehome.ui.theme.ColorExpense
 import com.example.financehome.ui.theme.ColorIncome
@@ -36,16 +44,26 @@ fun OpportunityScreen(
     modifier: Modifier = Modifier
 ) {
     var selectedTabIndex by remember { mutableIntStateOf(0) }
-    val tabTitles = listOf("Fake Portfolio", "Long-Term Projections")
+    val tabTitles = listOf("Real Portfolio", "Fake Portfolio ('What If')", "Projections")
 
+    // Real Portfolio state
+    val portfolioHoldings by viewModel.portfolioHoldings.collectAsState()
+    val portfolioSummary by viewModel.portfolioSummary.collectAsState()
+    val portfolioTrades by viewModel.portfolioTrades.collectAsState()
+    val isRefreshingPortfolio by viewModel.isRefreshingPortfolio.collectAsState()
+    var showAddTradeDialog by remember { mutableStateOf(false) }
+    var showSetHoldingDialog by remember { mutableStateOf(false) }
+
+    // Fake Portfolio / What If state
     val selectedTicker by viewModel.selectedTicker.collectAsState()
     val availableAssets by viewModel.availableAssets.collectAsState()
     val phantomItems by viewModel.phantomItems.collectAsState()
-    val isRefreshing by viewModel.isRefreshingPrices.collectAsState()
+    val isRefreshingPrices by viewModel.isRefreshingPrices.collectAsState()
     val totalSpent by viewModel.totalSpentOnDiscretionary.collectAsState()
     val totalPhantomVal by viewModel.totalPhantomValue.collectAsState()
     val totalMissedGainLoss by viewModel.totalMissedGainLoss.collectAsState()
 
+    // Projections state
     val assumedReturn by viewModel.assumedAnnualReturn.collectAsState()
     val simulatedMonthly by viewModel.simulatedMonthlyContribution.collectAsState()
     val actualMonthlySpend by viewModel.thisMonthDiscretionarySpend.collectAsState()
@@ -58,14 +76,28 @@ fun OpportunityScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Investment 'What If' Hub", fontWeight = FontWeight.Bold) },
+                title = { Text("Investments & Portfolio", fontWeight = FontWeight.Bold) },
                 actions = {
                     if (selectedTabIndex == 0) {
                         IconButton(
-                            onClick = { viewModel.refreshPrices() },
-                            enabled = !isRefreshing
+                            onClick = { viewModel.refreshPortfolioPrices() },
+                            enabled = !isRefreshingPortfolio
                         ) {
-                            if (isRefreshing) {
+                            if (isRefreshingPortfolio) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(Icons.Default.Refresh, contentDescription = "Refresh Portfolio Prices")
+                            }
+                        }
+                    } else if (selectedTabIndex == 1) {
+                        IconButton(
+                            onClick = { viewModel.refreshPrices() },
+                            enabled = !isRefreshingPrices
+                        ) {
+                            if (isRefreshingPrices) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(20.dp),
                                     strokeWidth = 2.dp
@@ -78,6 +110,17 @@ fun OpportunityScreen(
                 }
             )
         },
+        floatingActionButton = {
+            if (selectedTabIndex == 0) {
+                FloatingActionButton(
+                    onClick = { showAddTradeDialog = true },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Log Trade")
+                }
+            }
+        },
         modifier = modifier
     ) { innerPadding ->
         Column(
@@ -85,82 +128,95 @@ fun OpportunityScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // Asset selector bar: [SPY] [VOO] [QQQ] [NVDA] [+ Add Ticker]
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
-                    .padding(vertical = 8.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 2.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Tracked Asset / Fake Portfolio:",
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = selectedTicker,
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.ExtraBold),
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    availableAssets.forEach { asset ->
-                        val isSelected = asset.ticker == selectedTicker
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = { viewModel.selectTicker(asset.ticker) },
-                            label = { Text(asset.ticker, fontWeight = FontWeight.Bold) },
-                            leadingIcon = if (isSelected) {
-                                { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                            } else null,
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primary,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary
-                            )
-                        )
-                    }
-
-                    // Add Custom Ticker button
-                    AssistChip(
-                        onClick = {
-                            newTickerText = ""
-                            showAddTickerDialog = true
-                        },
-                        label = { Text("+ Ticker") },
-                        leadingIcon = {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                        }
-                    )
-                }
-            }
-
             TabRow(selectedTabIndex = selectedTabIndex) {
                 tabTitles.forEachIndexed { index, title ->
                     Tab(
                         selected = selectedTabIndex == index,
                         onClick = { selectedTabIndex = index },
-                        text = { Text(title, fontWeight = FontWeight.SemiBold) }
+                        text = { Text(title, fontWeight = FontWeight.SemiBold, maxLines = 1) }
                     )
                 }
             }
 
+            // Asset selector bar for Fake Portfolio / What If tab
+            if (selectedTabIndex == 1) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                        .padding(vertical = 8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Tracked Asset / Fake Portfolio:",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = selectedTicker,
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.ExtraBold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        availableAssets.forEach { asset ->
+                            val isSelected = asset.ticker == selectedTicker
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { viewModel.selectTicker(asset.ticker) },
+                                label = { Text(asset.ticker, fontWeight = FontWeight.Bold) },
+                                leadingIcon = if (isSelected) {
+                                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                } else null,
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                )
+                            )
+                        }
+
+                        AssistChip(
+                            onClick = {
+                                newTickerText = ""
+                                showAddTickerDialog = true
+                            },
+                            label = { Text("+ Ticker") },
+                            leadingIcon = {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            }
+                        )
+                    }
+                }
+            }
+
             when (selectedTabIndex) {
-                0 -> RealMarketTrackingTab(
+                0 -> RealPortfolioTab(
+                    summary = portfolioSummary,
+                    holdings = portfolioHoldings,
+                    trades = portfolioTrades,
+                    isRefreshing = isRefreshingPortfolio,
+                    currencyFormat = currencyFormat,
+                    onRefresh = { viewModel.refreshPortfolioPrices() },
+                    onAddTrade = { showAddTradeDialog = true },
+                    onSetHolding = { showSetHoldingDialog = true },
+                    onDeleteHolding = { viewModel.deleteHolding(it) },
+                    onDeleteTrade = { viewModel.deleteTrade(it) }
+                )
+                1 -> RealMarketTrackingTab(
                     ticker = selectedTicker,
                     items = phantomItems,
                     totalSpent = totalSpent,
@@ -169,7 +225,7 @@ fun OpportunityScreen(
                     currencyFormat = currencyFormat,
                     onRefresh = { viewModel.refreshPrices() }
                 )
-                1 -> LongTermProjectionsTab(
+                2 -> LongTermProjectionsTab(
                     ticker = selectedTicker,
                     simulatedMonthly = simulatedMonthly,
                     actualMonthlySpend = actualMonthlySpend,
@@ -219,6 +275,764 @@ fun OpportunityScreen(
             }
         )
     }
+
+    if (showAddTradeDialog) {
+        AddTradeDialog(
+            currencyFormat = currencyFormat,
+            onDismiss = { showAddTradeDialog = false },
+            onConfirm = { ticker, action, shares, price, notes ->
+                viewModel.addManualTrade(ticker, action, shares, price, notes)
+                showAddTradeDialog = false
+            }
+        )
+    }
+
+    if (showSetHoldingDialog) {
+        SetHoldingDialog(
+            currencyFormat = currencyFormat,
+            onDismiss = { showSetHoldingDialog = false },
+            onConfirm = { ticker, shares, avgCost ->
+                viewModel.setManualHolding(ticker, shares, avgCost)
+                showSetHoldingDialog = false
+            }
+        )
+    }
+}
+
+@Composable
+fun RealPortfolioTab(
+    summary: PortfolioSummary,
+    holdings: List<HoldingPerformance>,
+    trades: List<PortfolioTrade>,
+    isRefreshing: Boolean,
+    currencyFormat: NumberFormat,
+    onRefresh: () -> Unit,
+    onAddTrade: () -> Unit,
+    onSetHolding: () -> Unit,
+    onDeleteHolding: (PortfolioHolding) -> Unit,
+    onDeleteTrade: (PortfolioTrade) -> Unit
+) {
+    val isPositive = summary.totalGainLoss >= 0.0
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 80.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // Fidelity Integration Banner
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                ),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        Icons.Default.NotificationsActive,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Fidelity Auto-Sync Active",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Stock purchases & sales received via Fidelity notifications are automatically parsed and recorded into your portfolio.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
+        // Summary Hero Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isPositive)
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                    else
+                        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+                ),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Total Portfolio Value",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "${summary.holdingsCount} ${if (summary.holdingsCount == 1) "Holding" else "Holdings"}",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    Text(
+                        text = currencyFormat.format(summary.totalMarketValue),
+                        style = MaterialTheme.typography.headlineLarge.copy(
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = (-0.5).sp
+                        )
+                    )
+
+                    Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text(
+                                text = "Cost Basis (Invested)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = currencyFormat.format(summary.totalCostBasis),
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "Total Return / P&L",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            val sign = if (isPositive) "+" else ""
+                            Text(
+                                text = "$sign${currencyFormat.format(summary.totalGainLoss)} (${String.format(Locale.US, "%+.2f", summary.totalGainLossPercent)}%)",
+                                style = MaterialTheme.typography.titleSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isPositive) ColorIncome else ColorExpense
+                                )
+                            )
+                        }
+                    }
+
+                    // Action buttons
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onAddTrade,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Log Trade")
+                        }
+
+                        OutlinedButton(
+                            onClick = onSetHolding,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Set Position")
+                        }
+                    }
+                }
+            }
+        }
+
+        // Holdings Section Header
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Current Holdings",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+                if (isRefreshing) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                }
+            }
+        }
+
+        if (holdings.isEmpty()) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.TrendingUp,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(40.dp)
+                        )
+                        Text(
+                            text = "No stock positions tracked yet",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            textAlign = TextAlign.Center
+                        )
+                        Text(
+                            text = "When Fidelity sends an order execution notification (e.g. Bought 2 VOO @ \$485), it will be added here automatically.\n\nYou can also tap 'Log Trade' or 'Set Position' above to enter positions manually.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            }
+        } else {
+            items(holdings, key = { it.holding.ticker }) { item ->
+                PortfolioHoldingCard(
+                    perf = item,
+                    currencyFormat = currencyFormat,
+                    onDelete = { onDeleteHolding(item.holding) }
+                )
+            }
+        }
+
+        // Recent Trades Section
+        if (trades.isNotEmpty()) {
+            item {
+                Text(
+                    text = "Recent Trades & Ingestion History",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+
+            items(trades.take(20), key = { it.id }) { trade ->
+                PortfolioTradeItem(
+                    trade = trade,
+                    currencyFormat = currencyFormat,
+                    onDelete = { onDeleteTrade(trade) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun PortfolioHoldingCard(
+    perf: HoldingPerformance,
+    currencyFormat: NumberFormat,
+    onDelete: () -> Unit
+) {
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    val isGain = perf.totalGainLoss >= 0.0
+    val sharesStr = if (perf.holding.totalShares % 1.0 == 0.0) {
+        perf.holding.totalShares.toLong().toString()
+    } else {
+        String.format(Locale.US, "%.4f", perf.holding.totalShares).trimEnd('0').trimEnd('.')
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.primaryContainer)
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = perf.holding.ticker,
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                    Text(
+                        text = "$sharesStr shs",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = currencyFormat.format(perf.currentMarketValue),
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold)
+                        )
+                        val sign = if (isGain) "+" else ""
+                        Text(
+                            text = "$sign${currencyFormat.format(perf.totalGainLoss)} (${String.format(Locale.US, "%+.2f", perf.totalGainLossPercent)}%)",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = if (isGain) ColorIncome else ColorExpense
+                            )
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { showDeleteConfirm = true },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Delete Holding",
+                            tint = MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+
+            Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text(
+                        text = "Current Price",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = currencyFormat.format(perf.currentPrice),
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
+                    )
+                }
+
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "Avg Cost Basis",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = currencyFormat.format(perf.holding.averageBuyPrice),
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
+                    )
+                }
+
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = "Total Invested",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = currencyFormat.format(perf.holding.totalCostBasis),
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
+                    )
+                }
+            }
+        }
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete ${perf.holding.ticker}?") },
+            text = { Text("Are you sure you want to remove this position? Trade history will remain intact.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteConfirm = false
+                        onDelete()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun PortfolioTradeItem(
+    trade: PortfolioTrade,
+    currencyFormat: NumberFormat,
+    onDelete: () -> Unit
+) {
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    val isBuy = trade.action == TradeAction.BUY
+    val sharesStr = if (trade.shares % 1.0 == 0.0) {
+        trade.shares.toLong().toString()
+    } else {
+        String.format(Locale.US, "%.4f", trade.shares).trimEnd('0').trimEnd('.')
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (isBuy) ColorIncome.copy(alpha = 0.15f) else ColorExpense.copy(alpha = 0.15f))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = trade.action.name,
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = if (isBuy) ColorIncome else ColorExpense
+                    )
+                }
+
+                Column {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = trade.ticker,
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Text(
+                            text = "$sharesStr @ ${currencyFormat.format(trade.pricePerShare)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = formatTimestamp(trade.timestampMillis),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                        if (trade.source == TradeSource.NOTIFICATION) {
+                            Text(
+                                text = "• Fidelity Sync",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = currencyFormat.format(trade.totalAmount),
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                )
+                IconButton(
+                    onClick = { showDeleteConfirm = true },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Delete Trade",
+                        tint = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete Trade Record?") },
+            text = { Text("Are you sure you want to delete this ${trade.action.name} trade for ${trade.ticker}?") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteConfirm = false
+                        onDelete()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun AddTradeDialog(
+    currencyFormat: NumberFormat,
+    onDismiss: () -> Unit,
+    onConfirm: (ticker: String, action: TradeAction, shares: Double, price: Double, notes: String?) -> Unit
+) {
+    var ticker by remember { mutableStateOf("") }
+    var action by remember { mutableStateOf(TradeAction.BUY) }
+    var sharesText by remember { mutableStateOf("") }
+    var priceText by remember { mutableStateOf("") }
+    var notesText by remember { mutableStateOf("") }
+
+    val shares = sharesText.toDoubleOrNull()
+    val price = priceText.toDoubleOrNull()
+    val total = if (shares != null && price != null) shares * price else 0.0
+    val isValid = ticker.isNotBlank() && shares != null && shares > 0.0 && price != null && price >= 0.0
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Log Investment Trade") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = action == TradeAction.BUY,
+                        onClick = { action = TradeAction.BUY },
+                        label = { Text("BUY") },
+                        modifier = Modifier.weight(1f),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = ColorIncome.copy(alpha = 0.2f),
+                            selectedLabelColor = ColorIncome
+                        )
+                    )
+                    FilterChip(
+                        selected = action == TradeAction.SELL,
+                        onClick = { action = TradeAction.SELL },
+                        label = { Text("SELL") },
+                        modifier = Modifier.weight(1f),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = ColorExpense.copy(alpha = 0.2f),
+                            selectedLabelColor = ColorExpense
+                        )
+                    )
+                }
+
+                OutlinedTextField(
+                    value = ticker,
+                    onValueChange = { ticker = it.uppercase().trim() },
+                    label = { Text("Ticker (e.g. VOO, AAPL)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = sharesText,
+                    onValueChange = { sharesText = it },
+                    label = { Text("Number of Shares") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = priceText,
+                    onValueChange = { priceText = it },
+                    label = { Text("Price Per Share ($)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (total > 0.0) {
+                    Text(
+                        text = "Total Order Amount: ${currencyFormat.format(total)}",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                OutlinedTextField(
+                    value = notesText,
+                    onValueChange = { notesText = it },
+                    label = { Text("Notes (optional)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (isValid && shares != null && price != null) {
+                        onConfirm(ticker, action, shares, price, notesText.ifBlank { null })
+                    }
+                },
+                enabled = isValid
+            ) {
+                Text("Save Trade")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun SetHoldingDialog(
+    currencyFormat: NumberFormat,
+    onDismiss: () -> Unit,
+    onConfirm: (ticker: String, totalShares: Double, averageCost: Double) -> Unit
+) {
+    var ticker by remember { mutableStateOf("") }
+    var sharesText by remember { mutableStateOf("") }
+    var avgCostText by remember { mutableStateOf("") }
+
+    val shares = sharesText.toDoubleOrNull()
+    val avgCost = avgCostText.toDoubleOrNull()
+    val totalInvested = if (shares != null && avgCost != null) shares * avgCost else 0.0
+    val isValid = ticker.isNotBlank() && shares != null && shares > 0.0 && avgCost != null && avgCost >= 0.0
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Set Direct Position") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "Quickly define or overwrite your current holding balance and cost basis.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                OutlinedTextField(
+                    value = ticker,
+                    onValueChange = { ticker = it.uppercase().trim() },
+                    label = { Text("Ticker (e.g. VOO, AAPL)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = sharesText,
+                    onValueChange = { sharesText = it },
+                    label = { Text("Total Shares Owned") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = avgCostText,
+                    onValueChange = { avgCostText = it },
+                    label = { Text("Average Buy Price Per Share ($)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (totalInvested > 0.0) {
+                    Text(
+                        text = "Total Cost Basis: ${currencyFormat.format(totalInvested)}",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (isValid && shares != null && avgCost != null) {
+                        onConfirm(ticker, shares, avgCost)
+                    }
+                },
+                enabled = isValid
+            ) {
+                Text("Set Position")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable

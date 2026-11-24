@@ -10,6 +10,7 @@ import com.example.financehome.data.repository.DebtRepository
 import com.example.financehome.data.repository.WageRepository
 import com.example.financehome.domain.AmortizationRow
 import com.example.financehome.domain.DebtCalculator
+import com.example.financehome.domain.MultiDebtComparison
 import com.example.financehome.domain.PaycheckBreakdown
 import com.example.financehome.domain.PaycheckCalculator
 import com.example.financehome.domain.PaycheckConfig
@@ -55,6 +56,23 @@ class DebtsViewModel @Inject constructor(
                 started = SharingStarted.WhileSubscribed(5000),
                 initialValue = 0.0
             )
+
+    // ── Multi-Debt Payoff Optimizer ──────────────────────────────────────────
+
+    val extraMonthlyPayoffBudget = MutableStateFlow(100.0)
+
+    val multiDebtComparison: StateFlow<MultiDebtComparison> =
+        combine(debts, extraMonthlyPayoffBudget) { debtList, extra ->
+            DebtCalculator.compareMultiDebtPayoff(debtList, extra)
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = DebtCalculator.compareMultiDebtPayoff(emptyList(), 100.0)
+        )
+
+    fun setExtraMonthlyPayoffBudget(amount: Double) {
+        extraMonthlyPayoffBudget.value = maxOf(0.0, amount)
+    }
 
     // ── Bills ──────────────────────────────────────────────────────────────────
 

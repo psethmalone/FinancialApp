@@ -187,6 +187,47 @@ object PaycheckCalculator {
     }
 
     /**
+     * Returns the set of day-of-month numbers (1..31) that are paydays in the given year and month.
+     */
+    fun getPayDatesForMonth(
+        year: Int,
+        month: Int,
+        anchorPayDate: LocalDate,
+        frequency: PayFrequency
+    ): Set<Int> {
+        val monthStart = LocalDate.of(year, month, 1)
+        val monthEnd = monthStart.withDayOfMonth(monthStart.lengthOfMonth())
+        val payDays = mutableSetOf<Int>()
+
+        when (frequency) {
+            PayFrequency.WEEKLY, PayFrequency.BI_WEEKLY -> {
+                val step = if (frequency == PayFrequency.WEEKLY) 7L else 14L
+                val diff = monthStart.toEpochDay() - anchorPayDate.toEpochDay()
+                val rem = Math.floorMod(diff, step)
+                val firstEpoch = if (rem == 0L) monthStart.toEpochDay() else monthStart.toEpochDay() + (step - rem)
+                var cursor = LocalDate.ofEpochDay(firstEpoch)
+                while (!cursor.isAfter(monthEnd)) {
+                    if (cursor.monthValue == month && cursor.year == year) {
+                        payDays.add(cursor.dayOfMonth)
+                    }
+                    cursor = cursor.plusDays(step)
+                }
+            }
+            PayFrequency.SEMI_MONTHLY -> {
+                val anchorDay = anchorPayDate.dayOfMonth
+                val d1 = if (anchorDay <= 15) anchorDay else (anchorDay - 15).coerceAtLeast(1)
+                val d2 = (d1 + 15).coerceAtMost(monthEnd.dayOfMonth)
+                payDays.add(minOf(d1, monthEnd.dayOfMonth))
+                payDays.add(minOf(d2, monthEnd.dayOfMonth))
+            }
+            PayFrequency.MONTHLY -> {
+                payDays.add(minOf(anchorPayDate.dayOfMonth, monthEnd.dayOfMonth))
+            }
+        }
+        return payDays
+    }
+
+    /**
      * Finds which calendar months in `year` will have 3 bi-weekly pay dates from `anchorPayDate`.
      * Uses airtight modular arithmetic: finds the first pay date in `year` and collects all pay dates.
      */

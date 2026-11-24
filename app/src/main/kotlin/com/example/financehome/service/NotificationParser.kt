@@ -1,5 +1,6 @@
 package com.example.financehome.service
 
+import com.example.financehome.data.model.TradeAction
 import com.example.financehome.data.model.TransactionType
 
 data class ParsedTransaction(
@@ -9,15 +10,26 @@ data class ParsedTransaction(
     val rawText: String
 )
 
+data class ParsedBrokerageTrade(
+    val ticker: String,
+    val action: TradeAction,
+    val shares: Double,
+    val pricePerShare: Double,
+    val totalAmount: Double,
+    val rawText: String
+)
+
 /**
  * Pure Kotlin parser that inspects notification text from known financial apps
- * (Cash App, Ally Bank, generic banking apps) and extracts transaction details.
+ * (Cash App, Ally Bank, Fidelity, generic banking apps) and extracts transaction details.
  */
 class NotificationParser {
 
     companion object {
         const val PACKAGE_CASH_APP = "com.squareup.cash"
         const val PACKAGE_ALLY_BANK = "com.ally.mobile"
+        const val PACKAGE_FIDELITY = "com.fidelity.android"
+        const val PACKAGE_FIDELITY_SPIRE = "com.fidelity.spire"
     }
 
     /**
@@ -329,5 +341,97 @@ class NotificationParser {
             .replace(Regex("""\s+on\s+\d{1,2}/\d{1,2}(?:/\d{2,4})?.*$""", RegexOption.IGNORE_CASE), "")
             .replace(Regex("""\s+using\s+card.*$""", RegexOption.IGNORE_CASE), "")
             .trim()
+    }
+
+    // -----------------------------------------------------------------------
+    // Brokerage & Fidelity Trade Parsing
+    // -----------------------------------------------------------------------
+
+    private val fidelityTradeRegex1 = Regex(
+        """(?:.*?\border\s+(?:to\s+)?(?:was\s+)?(?:executed|filled)[:\s]*)?(?:Your order to\s+)?(?<action>Buy|Bought|Purchased|Sell|Sold)\s+(?<shares>\d+(?:\.\d+)?)\s+(?:shares?\s+of\s+)?(?<ticker>[A-Z]{1,6})\s+(?<prep>at|for|@)\s+\${'$'}(?<amount>[\d,]+(?:\.\d{1,4})?)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val fidelityTradeRegex2 = Regex(
+        """(?:Order\s+executed:\s+)?(?<action>Bought|Sold|Buy|Sell)\s+(?<shares>\d+(?:\.\d+)?)\s+(?<ticker>[A-Z]{1,6})\s*@\s*\${'$'}(?<price>[\d,]+(?:\.\d{1,4})?)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val fidelityTradeRegex3 = Regex(
+        """(?:Executed|Filled)[:\s]+(?<action>Buy|Sell)\s+(?<shares>\d+(?:\.\d+)?)\s+(?:shares?\s+of\s+)?(?<ticker>[A-Z]{1,6})\s*(?:@|at)\s*\${'$'}(?<price>[\d,]+(?:\.\d{1,4})?)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val fidelityDollarTradeRegex = Regex(
+        """(?<action>Bought|Purchased|Sold|Buy|Sell)\s+\${'$'}(?<amount>[\d,]+(?:\.\d{1,2})?)\s+(?:of|in)\s+(?<ticker>[A-Z]{1,6})""",
+        RegexOption.IGNORE_CASE
+    )
+
+    /**
+     * Parses stock and ETF execution alerts from brokerage apps (Fidelity, etc.).
+     */
+    fun parseBrokerageTrade(
+        packageName: String,
+        title: String?,
+        text: String?,
+        bigText: String? = null,
+        subText: String? = null
+    ): ParsedBrokerageTrade? {
+        if (packageName != PACKAGE_FIDELITY && packageName != PACKAGE_FIDELITY_SPIRE) {
+            return null
+        }
+        val combined = buildCombined(title, text, bigText, subText) ?: return null
+        return parseBrokerageTradeText(combined)
+    }
+
+    fun parseBrokerageTradeText(text: String): ParsedBrokerageTrade? {
+        fidelityTradeRegex1.find(text)?.let { m ->
+            val actStr = m.groups["action"]!!.value.uppercase()
+            val action = if (actStr.startsWith("B") || actStr.startsWith("P")) TradeAction.BUY else TradeAction.SELL
+            val shares = m.groups["shares"]!!.value.toDoubleOrNull() ?: 1.0
+            val rawAmount = parseAmount(m.groups["amount"]!!.value)
+            val prep = m.groups["prep"]?.value?.lowercase() ?: "at"
+            val ticker = m.groups["ticker"]!!.value.uppercase()
+
+            val pricePerShare: Double
+            val totalAmount: Double
+            if (prep == "for" && shares > 0.0) {
+                totalAmount = rawAmount
+                pricePerShare = totalAmount / shares
+            } else {
+                pricePerShare = rawAmount
+                totalAmount = shares * pricePerShare
+            }
+
+            return ParsedBrokerageTrade(ticker, action, shares, pricePerShare, totalAmount, text)
+        }
+
+        fidelityTradeRegex2.find(text)?.let { m ->
+            val actStr = m.groups["action"]!!.value.uppercase()
+            val action = if (actStr.startsWith("B") || actStr.startsWith("P")) TradeAction.BUY else TradeAction.SELL
+            val shares = m.groups["shares"]!!.value.toDoubleOrNull() ?: 1.0
+            val price = parseAmount(m.groups["price"]!!.value)
+            val ticker = m.groups["ticker"]!!.value.uppercase()
+            return ParsedBrokerageTrade(ticker, action, shares, price, shares * price, text)
+        }
+
+        fidelityTradeRegex3.find(text)?.let { m ->
+            val actStr = m.groups["action"]!!.value.uppercase()
+            val action = if (actStr.startsWith("B") || actStr.startsWith("P")) TradeAction.BUY else TradeAction.SELL
+            val shares = m.groups["shares"]!!.value.toDoubleOrNull() ?: 1.0
+            val price = parseAmount(m.groups["price"]!!.value)
+            val ticker = m.groups["ticker"]!!.value.uppercase()
+            return ParsedBrokerageTrade(ticker, action, shares, price, shares * price, text)
+        }
+
+        fidelityDollarTradeRegex.find(text)?.let { m ->
+            val actStr = m.groups["action"]!!.value.uppercase()
+            val action = if (actStr.startsWith("B") || actStr.startsWith("P")) TradeAction.BUY else TradeAction.SELL
+            val totalAmount = parseAmount(m.groups["amount"]!!.value)
+            val ticker = m.groups["ticker"]!!.value.uppercase()
+            return ParsedBrokerageTrade(ticker, action, 0.0, 0.0, totalAmount, text)
+        }
+
+        return null
     }
 }

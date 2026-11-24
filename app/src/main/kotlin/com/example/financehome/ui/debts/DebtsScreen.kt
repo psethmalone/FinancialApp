@@ -24,10 +24,15 @@ import androidx.compose.ui.unit.sp
 import com.example.financehome.data.model.Bill
 import com.example.financehome.data.model.Debt
 import com.example.financehome.data.model.DebtType
+import com.example.financehome.domain.DebtPayoffMilestone
+import com.example.financehome.domain.MultiDebtComparison
 import com.example.financehome.domain.ObligationType
 import com.example.financehome.domain.PayFrequency
 import com.example.financehome.domain.PaycheckBreakdown
+import com.example.financehome.domain.PaycheckCalculator
 import com.example.financehome.domain.PaycheckConfig
+import com.example.financehome.domain.PayoffStrategy
+import com.example.financehome.domain.StrategyPayoffResult
 import com.example.financehome.domain.UpcomingObligationItem
 import com.example.financehome.domain.WageConfig
 import com.example.financehome.domain.WageEstimate
@@ -60,6 +65,8 @@ fun DebtsScreen(
     val paycheckConfig by viewModel.paycheckConfig.collectAsState()
     val wageConfig by viewModel.wageConfig.collectAsState()
     val wageEstimate by viewModel.wageEstimate.collectAsState()
+    val multiDebtComparison by viewModel.multiDebtComparison.collectAsState()
+    val extraMonthlyPayoffBudget by viewModel.extraMonthlyPayoffBudget.collectAsState()
 
     var selectedTab by remember { mutableStateOf(ObligationTab.BILLS) }
     var showAddDebtDialog by remember { mutableStateOf(false) }
@@ -184,6 +191,18 @@ fun DebtsScreen(
                 }
             }
 
+            // Interactive Monthly Due Dates & Paydays Calendar
+            item {
+                DueDatesCalendarCard(
+                    bills = bills,
+                    debts = debts,
+                    paycheckConfig = paycheckConfig,
+                    currencyFormat = currencyFormat,
+                    onToggleBillPaid = { viewModel.toggleBillPaid(it) },
+                    onToggleDebtPaid = { viewModel.toggleDebtPaid(it) }
+                )
+            }
+
             // Paycheck-to-Obligations Cushion Allocator Card
             item {
                 PaycheckPlannerCard(
@@ -268,6 +287,15 @@ fun DebtsScreen(
                         EmptyDebtsCard(onAddDebt = { showAddDebtDialog = true })
                     }
                 } else {
+                    item {
+                        DebtPayoffOptimizerCard(
+                            comparison = multiDebtComparison,
+                            currentExtra = extraMonthlyPayoffBudget,
+                            currencyFormat = currencyFormat,
+                            onExtraChanged = { viewModel.setExtraMonthlyPayoffBudget(it) }
+                        )
+                    }
+
                     items(debts, key = { it.id }) { debt ->
                         DebtCardItem(
                             debt = debt,
@@ -1970,4 +1998,699 @@ fun VerifyPaydayDialog(
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
+}
+
+@Composable
+fun DueDatesCalendarCard(
+    bills: List<Bill>,
+    debts: List<Debt>,
+    paycheckConfig: PaycheckConfig,
+    currencyFormat: NumberFormat,
+    onToggleBillPaid: (Bill) -> Unit,
+    onToggleDebtPaid: (Debt) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var monthOffset by remember { mutableIntStateOf(0) }
+    val today = remember { LocalDate.now() }
+    val displayedMonth = remember(monthOffset) { today.plusMonths(monthOffset.toLong()) }
+    val year = displayedMonth.year
+    val month = displayedMonth.monthValue
+    val daysInMonth = displayedMonth.lengthOfMonth()
+
+    // 0 = Sunday, 1 = Monday, ... 6 = Saturday
+    val firstDayOfWeek = displayedMonth.withDayOfMonth(1).dayOfWeek.value % 7
+
+    val anchorPayDate = remember(paycheckConfig.anchorPayDateEpochDay) {
+        LocalDate.ofEpochDay(paycheckConfig.anchorPayDateEpochDay)
+    }
+    val payDays = remember(year, month, paycheckConfig) {
+        PaycheckCalculator.getPayDatesForMonth(year, month, anchorPayDate, paycheckConfig.frequency)
+    }
+
+    val billDays = remember(bills) { bills.groupBy { it.dueDayOfMonth } }
+    val debtDays = remember(debts) { debts.groupBy { it.dueDayOfMonth } }
+
+    var selectedDay by remember { mutableStateOf<Int?>(today.dayOfMonth) }
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Header: Month Navigation & Today Button
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    IconButton(
+                        onClick = { monthOffset-- },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(Icons.Default.ChevronLeft, contentDescription = "Previous Month")
+                    }
+                    Text(
+                        text = displayedMonth.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)),
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                    IconButton(
+                        onClick = { monthOffset++ },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(Icons.Default.ChevronRight, contentDescription = "Next Month")
+                    }
+                }
+
+                if (monthOffset != 0) {
+                    TextButton(
+                        onClick = {
+                            monthOffset = 0
+                            selectedDay = today.dayOfMonth
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text("Today", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            // Legend
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(ColorIncome))
+                    Text("Payday", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(ColorWarning))
+                    Text("Bill Due", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(ColorExpense))
+                    Text("Debt Due", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            // Day of Week Headers
+            val dayHeaders = listOf("S", "M", "T", "W", "T", "F", "S")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceAround
+            ) {
+                dayHeaders.forEach { header ->
+                    Text(
+                        text = header,
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.width(36.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            }
+
+            // Calendar Grid
+            val totalCells = firstDayOfWeek + daysInMonth
+            val totalRows = (totalCells + 6) / 7
+
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                for (row in 0 until totalRows) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceAround
+                    ) {
+                        for (col in 0 until 7) {
+                            val cellIndex = row * 7 + col
+                            val day = cellIndex - firstDayOfWeek + 1
+                            if (day in 1..daysInMonth) {
+                                val isToday = (year == today.year && month == today.monthValue && day == today.dayOfMonth)
+                                val isSelected = (selectedDay == day)
+                                val isPayday = payDays.contains(day)
+                                val hasBills = billDays.containsKey(day)
+                                val hasDebts = debtDays.containsKey(day)
+
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(
+                                            when {
+                                                isSelected -> MaterialTheme.colorScheme.primary
+                                                isToday -> MaterialTheme.colorScheme.primaryContainer
+                                                else -> Color.Transparent
+                                            }
+                                        )
+                                        .clickable {
+                                            selectedDay = if (selectedDay == day) null else day
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Text(
+                                            text = day.toString(),
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                fontWeight = if (isToday || isSelected) FontWeight.Bold else FontWeight.Normal
+                                            ),
+                                            color = when {
+                                                isSelected -> MaterialTheme.colorScheme.onPrimary
+                                                isToday -> MaterialTheme.colorScheme.onPrimaryContainer
+                                                else -> MaterialTheme.colorScheme.onSurface
+                                            }
+                                        )
+
+                                        // Indicator dots
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                            modifier = Modifier.height(4.dp)
+                                        ) {
+                                            if (isPayday) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(4.dp)
+                                                        .clip(CircleShape)
+                                                        .background(if (isSelected) MaterialTheme.colorScheme.onPrimary else ColorIncome)
+                                                )
+                                            }
+                                            if (hasBills) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(4.dp)
+                                                        .clip(CircleShape)
+                                                        .background(if (isSelected) MaterialTheme.colorScheme.onPrimary else ColorWarning)
+                                                )
+                                            }
+                                            if (hasDebts) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(4.dp)
+                                                        .clip(CircleShape)
+                                                        .background(if (isSelected) MaterialTheme.colorScheme.onPrimary else ColorExpense)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                Spacer(modifier = Modifier.size(36.dp))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Selected Day Details
+            Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+            if (selectedDay != null) {
+                val day = selectedDay!!
+                val isPayday = payDays.contains(day)
+                val dayBills = billDays[day] ?: emptyList()
+                val dayDebts = debtDays[day] ?: emptyList()
+                val totalDue = dayBills.sumOf { it.amount } + dayDebts.sumOf { it.minimumPayment }
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val dateFormatted = displayedMonth.withDayOfMonth(day)
+                            .format(DateTimeFormatter.ofPattern("EEE, MMM d", Locale.US))
+                        Text(
+                            text = dateFormatted,
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                        )
+                        if (totalDue > 0.0) {
+                            Text(
+                                text = "Total Due: ${currencyFormat.format(totalDue)}",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = ColorExpense
+                            )
+                        }
+                    }
+
+                    if (isPayday) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = ColorIncome.copy(alpha = 0.15f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.MonetizationOn,
+                                    contentDescription = null,
+                                    tint = ColorIncome,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Column {
+                                    Text(
+                                        text = "Payday Estimated Deposit",
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                        color = ColorIncome
+                                    )
+                                    Text(
+                                        text = "${currencyFormat.format(paycheckConfig.typicalTakeHomePay)} (${paycheckConfig.frequency.displayName})",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (dayBills.isEmpty() && dayDebts.isEmpty() && !isPayday) {
+                        Text(
+                            text = "No bills or debt payments scheduled for this date.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                    }
+
+                    dayBills.forEach { bill ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surface)
+                                .clickable { onToggleBillPaid(bill) }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (bill.isPaidThisMonth) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                    contentDescription = null,
+                                    tint = if (bill.isPaidThisMonth) ColorIncome else MaterialTheme.colorScheme.outline,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Column {
+                                    Text(
+                                        text = bill.name,
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            textDecoration = if (bill.isPaidThisMonth) TextDecoration.LineThrough else TextDecoration.None
+                                        )
+                                    )
+                                    Text(
+                                        text = "Bill • ${bill.category}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.outline
+                                    )
+                                }
+                            }
+                            Text(
+                                text = currencyFormat.format(bill.amount),
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+
+                    dayDebts.forEach { debt ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surface)
+                                .clickable { onToggleDebtPaid(debt) }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (debt.isPaidThisMonth) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                    contentDescription = null,
+                                    tint = if (debt.isPaidThisMonth) ColorIncome else MaterialTheme.colorScheme.outline,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Column {
+                                    Text(
+                                        text = debt.name,
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            textDecoration = if (debt.isPaidThisMonth) TextDecoration.LineThrough else TextDecoration.None
+                                        )
+                                    )
+                                    Text(
+                                        text = "Debt Min • ${(debt.apr * 100).toInt()}% APR",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.outline
+                                    )
+                                }
+                            }
+                            Text(
+                                text = currencyFormat.format(debt.minimumPayment),
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+                }
+            } else {
+                Text(
+                    text = "Tap any date to inspect due obligations or payday schedules.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun DebtPayoffOptimizerCard(
+    comparison: MultiDebtComparison,
+    currentExtra: Double,
+    currencyFormat: NumberFormat,
+    onExtraChanged: (Double) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var selectedStrategy by remember { mutableStateOf(PayoffStrategy.AVALANCHE) }
+    val activeResult = if (selectedStrategy == PayoffStrategy.AVALANCHE) {
+        comparison.avalancheResult
+    } else {
+        comparison.snowballResult
+    }
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Speed,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Column {
+                        Text(
+                            text = "Debt Payoff Strategy Optimizer",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Text(
+                            text = "Rollover momentum: paid debts roll into next target",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            // Extra Monthly Budget Chips
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "Extra Monthly Payoff Budget: ${currencyFormat.format(currentExtra)}/mo",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(0.0, 50.0, 100.0, 250.0, 500.0).forEach { amount ->
+                        val isSelected = currentExtra == amount
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = { onExtraChanged(amount) },
+                            label = {
+                                Text(
+                                    if (amount == 0.0) "$0" else "+$${amount.toInt()}",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                            )
+                        )
+                    }
+                }
+            }
+
+            // Strategy Tab Switcher (Avalanche vs Snowball)
+            TabRow(
+                selectedTabIndex = selectedStrategy.ordinal,
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier.clip(RoundedCornerShape(10.dp))
+            ) {
+                Tab(
+                    selected = selectedStrategy == PayoffStrategy.AVALANCHE,
+                    onClick = { selectedStrategy = PayoffStrategy.AVALANCHE },
+                    text = {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(vertical = 4.dp)) {
+                            Text("Debt Avalanche", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+                            Text("Highest APR First", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                        }
+                    }
+                )
+                Tab(
+                    selected = selectedStrategy == PayoffStrategy.SNOWBALL,
+                    onClick = { selectedStrategy = PayoffStrategy.SNOWBALL },
+                    text = {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(vertical = 4.dp)) {
+                            Text("Debt Snowball", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+                            Text("Lowest Balance First", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                        }
+                    }
+                )
+            }
+
+            // Outcome Hero Box
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surface,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "DEBT-FREE DATE",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                            val freeDateStr = if (activeResult.totalMonths > 0) {
+                                formatPayoffDate(activeResult.debtFreeDateMillis)
+                            } else "Never"
+                            Text(
+                                text = freeDateStr,
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = ColorIncome
+                                )
+                            )
+                        }
+
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "TOTAL TIME",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                            val timeStr = if (activeResult.totalMonths > 0) {
+                                val yrs = activeResult.totalMonths / 12
+                                val mos = activeResult.totalMonths % 12
+                                if (yrs > 0) "${yrs}y ${mos}m" else "${mos} months"
+                            } else "N/A"
+                            Text(
+                                text = timeStr,
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+
+                    Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text(
+                                text = "Total Interest Paid",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = currencyFormat.format(activeResult.totalInterestPaid),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                            )
+                        }
+
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "Interest Saved vs Minimums",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "+${currencyFormat.format(activeResult.totalInterestSavedVsMinimum)}",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = ColorIncome
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Payoff Order Milestones
+            if (activeResult.milestones.isNotEmpty()) {
+                Text(
+                    text = "Payoff Sequence & Milestones:",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    activeResult.milestones.forEachIndexed { idx, milestone ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f))
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primaryContainer),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "${idx + 1}",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                                Column {
+                                    Text(
+                                        text = milestone.debtName,
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                                    )
+                                    Text(
+                                        text = "Month ${milestone.payoffMonth} (${formatPayoffDate(milestone.payoffDateMillis)})",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.outline
+                                    )
+                                }
+                            }
+
+                            Text(
+                                text = "Interest: ${currencyFormat.format(milestone.totalInterestPaid)}",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Benchmark vs Minimums
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    Icons.Default.Info,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = if (comparison.minimumOnlyTotalMonths > 0) {
+                        "Minimums only: ${comparison.minimumOnlyTotalMonths} months to finish, paying ${currencyFormat.format(comparison.minimumOnlyTotalInterest)} in interest."
+                    } else {
+                        "Minimums only: Payments don't cover interest on some debts (never debt-free without extra)."
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline
+                )
+            }
+        }
+    }
 }

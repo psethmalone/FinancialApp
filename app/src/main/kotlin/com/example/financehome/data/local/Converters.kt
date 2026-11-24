@@ -1,4 +1,4 @@
-﻿package com.example.financehome.data.local
+package com.example.financehome.data.local
 
 import androidx.room.TypeConverter
 import com.example.financehome.data.model.DebtType
@@ -39,4 +39,20 @@ class Converters {
     @TypeConverter
     fun toDebtType(value: String): DebtType =
         DebtType.valueOf(value)
+
+    // ── TradeAction & TradeSource ─────────────────────────────────────────────
+
+    @TypeConverter
+    fun fromTradeAction(value: com.example.financehome.data.model.TradeAction): String = value.name
+
+    @TypeConverter
+    fun toTradeAction(value: String): com.example.financehome.data.model.TradeAction =
+        com.example.financehome.data.model.TradeAction.valueOf(value)
+
+    @TypeConverter
+    fun fromTradeSource(value: com.example.financehome.data.model.TradeSource): String = value.name
+
+    @TypeConverter
+    fun toTradeSource(value: String): com.example.financehome.data.model.TradeSource =
+        com.example.financehome.data.model.TradeSource.valueOf(value)
 }
