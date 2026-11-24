@@ -286,4 +286,138 @@ class PaycheckCalculatorTest {
         assertFalse("Period 3 is future period", period3.isCurrentPeriod)
         assertEquals(1600.0, period3.projectedTakeHomePay, 0.01)
     }
+
+    @Test
+    fun testForwardSchedule_userScenario_pay3DeficitCoveredByPay2() {
+        // Bi-weekly schedule starting May 2, 2026
+        // Pay 1: May 2 to May 16
+        // Pay 2: May 16 to May 30
+        // Pay 3: May 30 to June 13
+        val bills = listOf(
+            Bill("b1", "Phone", 400.0, 15, "Utilities"),     // May 15 -> Pay 1 window
+            Bill("b2", "Electric", 500.0, 18, "Utilities"),  // May 18 -> Pay 2 window
+            Bill("b3", "Rent", 1800.0, 1, "Housing")         // June 1 -> Pay 3 window
+        )
+
+        val schedule = PaycheckCalculator.projectUpcomingPayPeriods(
+            bills = bills,
+            debts = emptyList(),
+            firstPayDate = LocalDate.of(2026, 5, 2),
+            frequency = PayFrequency.BI_WEEKLY,
+            takeHomePay = 1500.0,
+            periodCount = 3
+        )
+
+        assertEquals(3, schedule.size)
+
+        val p1 = schedule[0]
+        val p2 = schedule[1]
+        val p3 = schedule[2]
+
+        // Raw calculations:
+        // P1: 1500 - 400 = 1100
+        // P2: 1500 - 500 = 1000
+        // P3: 1500 - 1800 = -300 (Deficit!)
+        assertEquals(1100.0, p1.rawSafeToSpend, 0.01)
+        assertEquals(1000.0, p2.rawSafeToSpend, 0.01)
+        assertEquals(-300.0, p3.rawSafeToSpend, 0.01)
+
+        // After Deficit Smoothing:
+        // Pay 2 sets aside $300 for Pay 3
+        assertEquals(300.0, p2.reserveHeldForFutureChecks, 0.01)
+        assertEquals(700.0, p2.safeToSpend, 0.01)
+        assertNotNull(p2.deficitNote)
+        assertTrue("Pay 2 note references Pay #3", p2.deficitNote!!.contains("Pay #3"))
+
+        // Pay 3 has its $300 deficit fully covered by Pay 2 -> safeToSpend is 0.00 (not -300!)
+        assertEquals(300.0, p3.coveredDeficitByPriorChecks, 0.01)
+        assertEquals(0.0, p3.safeToSpend, 0.01)
+        assertNotNull(p3.deficitNote)
+        assertTrue("Pay 3 note references Pay #2", p3.deficitNote!!.contains("Pay #2"))
+
+        // Pay 1 is unaffected because Pay 2 had enough surplus to cover Pay 3 completely
+        assertEquals(0.0, p1.reserveHeldForFutureChecks, 0.01)
+        assertEquals(1100.0, p1.safeToSpend, 0.01)
+        assertNull(p1.deficitNote)
+    }
+
+    @Test
+    fun testForwardSchedule_cascadingDeficitCoveredByMultipleChecks() {
+        // Pay 1 (May 2-16): 1500 take-home, 500 bills -> +1000 raw
+        // Pay 2 (May 16-30): 1500 take-home, 1400 bills -> +100 raw
+        // Pay 3 (May 30-Jun 13): 1500 take-home, 1800 bills -> -300 raw
+        val bills = listOf(
+            Bill("b1", "Phone", 500.0, 15, "Utilities"),
+            Bill("b2", "Credit", 1400.0, 20, "Debts"),
+            Bill("b3", "Rent", 1800.0, 1, "Housing")
+        )
+
+        val schedule = PaycheckCalculator.projectUpcomingPayPeriods(
+            bills = bills,
+            debts = emptyList(),
+            firstPayDate = LocalDate.of(2026, 5, 2),
+            frequency = PayFrequency.BI_WEEKLY,
+            takeHomePay = 1500.0,
+            periodCount = 3
+        )
+
+        val p1 = schedule[0]
+        val p2 = schedule[1]
+        val p3 = schedule[2]
+
+        // Raw calculations
+        assertEquals(1000.0, p1.rawSafeToSpend, 0.01)
+        assertEquals(100.0, p2.rawSafeToSpend, 0.01)
+        assertEquals(-300.0, p3.rawSafeToSpend, 0.01)
+
+        // Pay 2 only has 100 surplus, so it contributes 100 (safe = 0.0)
+        assertEquals(100.0, p2.reserveHeldForFutureChecks, 0.01)
+        assertEquals(0.0, p2.safeToSpend, 0.01)
+
+        // Remaining 200 cascades back to Pay 1
+        assertEquals(200.0, p1.reserveHeldForFutureChecks, 0.01)
+        assertEquals(800.0, p1.safeToSpend, 0.01)
+
+        // Pay 3 is fully covered: 100 from P2 + 200 from P1 = 300
+        assertEquals(300.0, p3.coveredDeficitByPriorChecks, 0.01)
+        assertEquals(0.0, p3.safeToSpend, 0.01)
+    }
+
+    @Test
+    fun testForwardSchedule_unavoidableDeficit() {
+        // Pay 1 (May 2-16): 1000 take-home, 900 bills -> +100 raw
+        // Pay 2 (May 16-30): 1000 take-home, 950 bills -> +50 raw
+        // Pay 3 (May 30-Jun 13): 1000 take-home, 1500 bills -> -500 raw
+        // Total surplus = 150, but needed = 500. Shortfall = -350.
+        val bills = listOf(
+            Bill("b1", "Bill 1", 900.0, 15, "Utilities"),
+            Bill("b2", "Bill 2", 950.0, 20, "Utilities"),
+            Bill("b3", "Rent", 1500.0, 1, "Housing")
+        )
+
+        val schedule = PaycheckCalculator.projectUpcomingPayPeriods(
+            bills = bills,
+            debts = emptyList(),
+            firstPayDate = LocalDate.of(2026, 5, 2),
+            frequency = PayFrequency.BI_WEEKLY,
+            takeHomePay = 1000.0,
+            periodCount = 3
+        )
+
+        val p1 = schedule[0]
+        val p2 = schedule[1]
+        val p3 = schedule[2]
+
+        assertEquals(100.0, p1.reserveHeldForFutureChecks, 0.01)
+        assertEquals(0.0, p1.safeToSpend, 0.01)
+
+        assertEquals(50.0, p2.reserveHeldForFutureChecks, 0.01)
+        assertEquals(0.0, p2.safeToSpend, 0.01)
+
+        // P3 gets 150 covered, still has -350 deficit
+        assertEquals(150.0, p3.coveredDeficitByPriorChecks, 0.01)
+        assertEquals(-350.0, p3.safeToSpend, 0.01)
+        assertTrue(p3.deficitNote!!.contains("remaining deficit"))
+    }
 }
+

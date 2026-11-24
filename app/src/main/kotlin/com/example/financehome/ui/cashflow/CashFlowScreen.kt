@@ -1232,11 +1232,27 @@ fun CashFlowPaycheckPlannerCard(
                                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                                     color = ColorExpense
                                 )
+                                val safeColor = when {
+                                    period.safeToSpend > 0.001 -> ColorIncome
+                                    period.safeToSpend >= -0.001 -> MaterialTheme.colorScheme.primary
+                                    else -> ColorExpense
+                                }
                                 Text(
                                     text = "${currencyFormat.format(period.safeToSpend)} safe",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = ColorIncome
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = safeColor
                                 )
+                                if (!period.deficitNote.isNullOrBlank()) {
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = period.deficitNote,
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        ),
+                                        color = if (period.reserveHeldForFutureChecks > 0.001) ColorWarning else if (period.safeToSpend >= -0.001) ColorIncome else ColorExpense
+                                    )
+                                }
                             }
                         }
                     }

@@ -2,6 +2,7 @@ package com.example.financehome.domain
 
 import com.example.financehome.data.model.Bill
 import com.example.financehome.data.model.Debt
+import java.text.NumberFormat
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
@@ -123,7 +124,8 @@ object PaycheckCalculator {
             currentSafeToSpend = currentSafeToSpend,
             baselineSafeToSpend = baselineSafeToSpend,
             isCurrentPeriodOvertime = effectiveIsCurrentPeriodOvertime,
-            currentPeriodOvertimeHours = currentPeriodOvertimeHours
+            currentPeriodOvertimeHours = currentPeriodOvertimeHours,
+            currentPeriodReserveHeldForFutureChecks = upcomingPayPeriods.firstOrNull()?.reserveHeldForFutureChecks ?: 0.0
         )
     }
 
@@ -481,6 +483,12 @@ object PaycheckCalculator {
      * Projects forward multi-paycheck schedules (e.g. next 3 pay periods) with bills and debts mapped to each check.
      * Period 1 uses currentTakeHomePay (reflecting logged hours/overtime/verified pay).
      * Periods 2+ strictly use baselineTakeHomePay (reflecting standard 40 hrs/wk baseline).
+     *
+     * Deficit Smoothing:
+     * If any future paycheck (e.g. Pay #3) has a deficit (obligations > take-home),
+     * preceding paychecks (closest preceding check first) reserve funds to pre-fund that deficit.
+     * The future check's safe-to-spend is brought up to $0.00 (covered), and the prior check's safe-to-spend
+     * is reduced by the reserved amount so the user cannot overspend and be left stranded.
      */
     fun projectUpcomingPayPeriods(
         bills: List<Bill>,
@@ -491,7 +499,21 @@ object PaycheckCalculator {
         baselineTakeHomePay: Double,
         periodCount: Int = 3
     ): List<PayPeriodSchedule> {
-        val list = mutableListOf<PayPeriodSchedule>()
+        val currencyFormat = NumberFormat.getCurrencyInstance(Locale.US)
+
+        // Phase 1: Compute window obligations and raw safe-to-spend for each period
+        data class RawPeriod(
+            val periodIndex: Int,
+            val payDate: LocalDate,
+            val nextPayDate: LocalDate,
+            val obligations: List<UpcomingObligationItem>,
+            val totalObligations: Double,
+            val takeHome: Double,
+            val rawSafe: Double,
+            val isCurrent: Boolean
+        )
+
+        val rawPeriods = mutableListOf<RawPeriod>()
         var start = firstPayDate
 
         for (i in 0 until periodCount) {
@@ -500,24 +522,126 @@ object PaycheckCalculator {
             val next = calculateFollowingPayDate(start, frequency)
             val windowObligations = getScheduledObligationsInWindow(bills, debts, start, next)
             val totalObligations = windowObligations.sumOf { it.amount }
-            val safeToSpend = takeHome - totalObligations
+            val rawSafe = takeHome - totalObligations
 
-            list.add(
-                PayPeriodSchedule(
+            rawPeriods.add(
+                RawPeriod(
                     periodIndex = i + 1,
                     payDate = start,
                     nextPayDate = next,
                     obligations = windowObligations,
                     totalObligations = totalObligations,
-                    safeToSpend = safeToSpend,
-                    projectedTakeHomePay = takeHome,
-                    isCurrentPeriod = isCurrent
+                    takeHome = takeHome,
+                    rawSafe = rawSafe,
+                    isCurrent = isCurrent
                 )
             )
             start = next
         }
 
-        return list
+        // Phase 2: Backward Deficit Smoothing
+        // If a future paycheck (e.g. Pay #3) has rawSafe < 0, earlier paychecks (closest preceding check first)
+        // reserve funds to pre-fund that deficit so the user does not overspend and be left with unpaid bills.
+        class DeficitRequirement(val targetPeriodIndex: Int, var amountNeeded: Double)
+
+        val pendingDeficits = mutableListOf<DeficitRequirement>()
+        val reserveHeldForFuture = DoubleArray(periodCount) { 0.0 }
+        val coveredDeficitByPrior = DoubleArray(periodCount) { 0.0 }
+        val fundingBreakdown = Array(periodCount) { mutableListOf<Pair<Int, Double>>() }
+        val fundedByBreakdown = Array(periodCount) { mutableListOf<Pair<Int, Double>>() }
+
+        // Find deficits in chronological order from future to present
+        for (i in periodCount - 1 downTo 0) {
+            val raw = rawPeriods[i].rawSafe
+            if (raw < 0.0) {
+                pendingDeficits.add(DeficitRequirement(rawPeriods[i].periodIndex, -raw))
+            }
+        }
+
+        // Iterate backwards from period N-1 down to 0, absorbing pending deficits with available surplus
+        for (i in periodCount - 1 downTo 0) {
+            val raw = rawPeriods[i].rawSafe
+            if (raw > 0.0) {
+                var availableSurplus = raw
+                // Fund pending deficits for periods strictly AFTER period i (earliest future period first)
+                val relevantDeficits = pendingDeficits
+                    .filter { it.targetPeriodIndex > rawPeriods[i].periodIndex && it.amountNeeded > 0.001 }
+                    .sortedBy { it.targetPeriodIndex }
+
+                for (def in relevantDeficits) {
+                    if (availableSurplus <= 0.001) break
+                    val allocation = minOf(availableSurplus, def.amountNeeded)
+                    availableSurplus -= allocation
+                    def.amountNeeded -= allocation
+                    reserveHeldForFuture[i] += allocation
+                    val targetIdx = def.targetPeriodIndex - 1
+                    coveredDeficitByPrior[targetIdx] += allocation
+                    fundingBreakdown[i].add(Pair(def.targetPeriodIndex, allocation))
+                    fundedByBreakdown[targetIdx].add(Pair(rawPeriods[i].periodIndex, allocation))
+                }
+            }
+        }
+
+        // Phase 3: Construct adjusted PayPeriodSchedules with notes
+        val result = mutableListOf<PayPeriodSchedule>()
+        for (i in 0 until periodCount) {
+            val p = rawPeriods[i]
+            val reserveHeld = reserveHeldForFuture[i]
+            val coveredDeficit = coveredDeficitByPrior[i]
+
+            val adjustedSafe = if (p.rawSafe >= 0.0) {
+                p.rawSafe - reserveHeld
+            } else {
+                p.rawSafe + coveredDeficit
+            }
+
+            // Generate clear, user-friendly deficit notes
+            val note = when {
+                reserveHeld > 0.001 -> {
+                    val targets = fundingBreakdown[i]
+                    if (targets.size == 1) {
+                        "(-${currencyFormat.format(reserveHeld)} held for Pay #${targets[0].first})"
+                    } else {
+                        "(-${currencyFormat.format(reserveHeld)} held for future bills)"
+                    }
+                }
+                coveredDeficit > 0.001 -> {
+                    val sources = fundedByBreakdown[i]
+                    if (adjustedSafe >= -0.001) {
+                        if (sources.size == 1) {
+                            "(+${currencyFormat.format(coveredDeficit)} from Pay #${sources[0].first})"
+                        } else {
+                            "(+${currencyFormat.format(coveredDeficit)} from prior checks)"
+                        }
+                    } else {
+                        "(${currencyFormat.format(adjustedSafe)} remaining deficit)"
+                    }
+                }
+                adjustedSafe < -0.001 -> {
+                    "(Unfunded deficit ${currencyFormat.format(adjustedSafe)})"
+                }
+                else -> null
+            }
+
+            result.add(
+                PayPeriodSchedule(
+                    periodIndex = p.periodIndex,
+                    payDate = p.payDate,
+                    nextPayDate = p.nextPayDate,
+                    obligations = p.obligations,
+                    totalObligations = p.totalObligations,
+                    safeToSpend = adjustedSafe,
+                    projectedTakeHomePay = p.takeHome,
+                    isCurrentPeriod = p.isCurrent,
+                    rawSafeToSpend = p.rawSafe,
+                    reserveHeldForFutureChecks = reserveHeld,
+                    coveredDeficitByPriorChecks = coveredDeficit,
+                    deficitNote = note
+                )
+            )
+        }
+
+        return result
     }
 
     /**
