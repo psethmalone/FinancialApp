@@ -40,7 +40,6 @@ import com.example.financehome.ui.transactions.TransactionsViewModel
 
 enum class MainTab(val label: String, val icon: ImageVector) {
     DASHBOARD("Home", Icons.Default.Dashboard),
-    TRANSACTIONS("Activity", Icons.Default.ReceiptLong),
     DEBTS("Bills & Debt", Icons.Default.CreditCard),
     OPPORTUNITY("Invest", Icons.Default.TrendingUp),
     SETTINGS("Settings", Icons.Default.Settings)
@@ -137,13 +136,8 @@ fun AppNavigation(modifier: Modifier = Modifier) {
                             MainTab.DASHBOARD -> DashboardScreen(
                                 viewModel = dashboardViewModel,
                                 onNavigateToAddTransaction = { showAddTransactionScreen = true },
-                                onNavigateToTransactions = { selectedTab = MainTab.TRANSACTIONS },
                                 onNavigateToDebts = { selectedTab = MainTab.DEBTS },
                                 onNavigateToSwipeCategorize = { showSwipeCategorizeScreen = true }
-                            )
-                            MainTab.TRANSACTIONS -> TransactionsScreen(
-                                viewModel = transactionsViewModel,
-                                onNavigateToAddTransaction = { showAddTransactionScreen = true }
                             )
                             MainTab.DEBTS -> DebtsScreen(
                                 viewModel = debtsViewModel,

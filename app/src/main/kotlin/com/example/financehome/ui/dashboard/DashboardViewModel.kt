@@ -98,6 +98,62 @@ class DashboardViewModel @Inject constructor(
                 initialValue = 0
             )
 
+    // Transaction Search & Filter state
+    val searchQuery = MutableStateFlow("")
+    val selectedCategory = MutableStateFlow<String?>(null)
+
+    val allTransactions: StateFlow<List<Transaction>> =
+        transactionRepo.getAllTransactions()
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = emptyList()
+            )
+
+    val filteredTransactions: StateFlow<List<Transaction>> =
+        combine(allTransactions, searchQuery, selectedCategory) { list, query, category ->
+            list.filter { item ->
+                val matchesQuery = query.isBlank() ||
+                        item.merchant.contains(query, ignoreCase = true) ||
+                        item.category.contains(query, ignoreCase = true) ||
+                        (item.notes != null && item.notes.contains(query, ignoreCase = true))
+
+                val matchesCategory = category == null || item.category.equals(category, ignoreCase = true)
+
+                matchesQuery && matchesCategory
+            }
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    fun onSearchQueryChange(query: String) {
+        searchQuery.value = query
+    }
+
+    fun onCategorySelect(category: String?) {
+        selectedCategory.value = if (selectedCategory.value == category) null else category
+    }
+
+    fun updateTransactionCategory(transaction: Transaction, newCategory: String) {
+        viewModelScope.launch {
+            transactionRepo.updateTransaction(transaction.copy(category = newCategory))
+        }
+    }
+
+    fun toggleDiscretionary(transaction: Transaction, isDiscretionary: Boolean) {
+        viewModelScope.launch {
+            transactionRepo.updateTransaction(transaction.copy(isDiscretionary = isDiscretionary))
+        }
+    }
+
+    fun deleteTransaction(transaction: Transaction) {
+        viewModelScope.launch {
+            transactionRepo.deleteTransaction(transaction)
+        }
+    }
+
     val recentTransactions: StateFlow<List<Transaction>> =
         transactionRepo.getAllTransactions()
             .map { list -> list.take(5) }

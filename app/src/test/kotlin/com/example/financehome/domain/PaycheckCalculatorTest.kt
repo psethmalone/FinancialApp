@@ -31,7 +31,7 @@ class PaycheckCalculatorTest {
         val config = PaycheckConfig(
             frequency = PayFrequency.BI_WEEKLY,
             typicalTakeHomePay = 1800.0,
-            nextPayDateEpochDay = LocalDate.of(2026, 5, 1).toEpochDay()
+            anchorPayDateEpochDay = LocalDate.of(2026, 5, 1).toEpochDay()
         )
 
         val breakdown = PaycheckCalculator.calculateBreakdown(sampleBills, sampleDebts, config)
@@ -53,7 +53,7 @@ class PaycheckCalculatorTest {
         val config = PaycheckConfig(
             frequency = PayFrequency.BI_WEEKLY,
             typicalTakeHomePay = 700.0,
-            nextPayDateEpochDay = LocalDate.of(2026, 5, 1).toEpochDay()
+            anchorPayDateEpochDay = LocalDate.of(2026, 5, 1).toEpochDay()
         )
 
         val breakdown = PaycheckCalculator.calculateBreakdown(sampleBills, sampleDebts, config)
@@ -70,7 +70,7 @@ class PaycheckCalculatorTest {
         val config = PaycheckConfig(
             frequency = PayFrequency.SEMI_MONTHLY,
             typicalTakeHomePay = 2000.0,
-            nextPayDateEpochDay = LocalDate.of(2026, 5, 1).toEpochDay()
+            anchorPayDateEpochDay = LocalDate.of(2026, 5, 1).toEpochDay()
         )
 
         val breakdown = PaycheckCalculator.calculateBreakdown(sampleBills, sampleDebts, config)
@@ -100,5 +100,89 @@ class PaycheckCalculatorTest {
         val threePayMonths = PaycheckCalculator.findThreePaycheckMonths(2026, anchor)
 
         assertEquals("Should have exactly 2 three-paycheck months in a calendar year", 2, threePayMonths.size)
+        assertTrue(threePayMonths.contains("January 2026"))
+        assertTrue(threePayMonths.contains("July 2026"))
+    }
+
+    @Test
+    fun testCohortBThreePaycheckMonths() {
+        // If anchor is Friday Jan 9, 2026 (or Nov 27, 2026):
+        // Pay dates fall on Jan 9, 23; Feb 6, 20; Mar 6, 20; Apr 3, 17; May 1, 15, 29 (3 in May!); Oct 2, 16, 30 (3 in Oct!)
+        val anchor = LocalDate.of(2026, 11, 27)
+        val threePayMonths = PaycheckCalculator.findThreePaycheckMonths(2026, anchor)
+
+        assertEquals(2, threePayMonths.size)
+        assertTrue(threePayMonths.contains("May 2026"))
+        assertTrue(threePayMonths.contains("October 2026"))
+    }
+
+    @Test
+    fun testPayDateAdvancementFromPastAnchor() {
+        // If anchor was set to Friday Nov 13, 2026
+        // Today is Tuesday Nov 24, 2026
+        // Next payday must automatically advance to Friday Nov 27, 2026!
+        val anchor = LocalDate.of(2026, 11, 13)
+        val today = LocalDate.of(2026, 11, 24)
+
+        val nextPay = PaycheckCalculator.calculateNextPayDate(anchor, PayFrequency.BI_WEEKLY, today)
+        assertEquals(LocalDate.of(2026, 11, 27), nextPay)
+
+        // And following payday must be Dec 11, 2026
+        val followingPay = PaycheckCalculator.calculateFollowingPayDate(nextPay, PayFrequency.BI_WEEKLY)
+        assertEquals(LocalDate.of(2026, 12, 11), followingPay)
+    }
+
+    @Test
+    fun testScheduledBillsInWindowAndVariance() {
+        // Rent (1st: 1200), Electric (10th: 150), Internet (20th: 75)
+        // Paycheck window: Nov 27, 2026 to Dec 11, 2026
+        // Bills inside window: Rent (Dec 1: $1200) and Electric (Dec 10: $150) -> Total $1350
+        val config = PaycheckConfig(
+            frequency = PayFrequency.BI_WEEKLY,
+            typicalTakeHomePay = 1800.0,
+            anchorPayDateEpochDay = LocalDate.of(2026, 11, 27).toEpochDay()
+        )
+        val today = LocalDate.of(2026, 11, 24)
+        val breakdown = PaycheckCalculator.calculateBreakdown(sampleBills, sampleDebts, config, today)
+
+        assertEquals(1350.0, breakdown.windowBillsTotal, 0.01)
+        assertEquals(2, breakdown.billsDueInPeriod.size)
+        assertEquals("Rent", breakdown.billsDueInPeriod[0].bill.name)
+        assertEquals(LocalDate.of(2026, 12, 1), breakdown.billsDueInPeriod[0].dueDate)
+        assertEquals("Electric", breakdown.billsDueInPeriod[1].bill.name)
+        assertEquals(LocalDate.of(2026, 12, 10), breakdown.billsDueInPeriod[1].dueDate)
+
+        // Steady reserve is $876.92. Window bills is $1350. Variance = 876.92 - 1350 = -473.08 (rent peak!)
+        assertEquals(-473.08, breakdown.windowVariance, 0.05)
+        assertEquals(3, breakdown.daysUntilPay)
+    }
+
+    @Test
+    fun testMultiPayPeriodProjection() {
+        val config = PaycheckConfig(
+            frequency = PayFrequency.BI_WEEKLY,
+            typicalTakeHomePay = 1800.0,
+            anchorPayDateEpochDay = LocalDate.of(2026, 11, 27).toEpochDay()
+        )
+        val today = LocalDate.of(2026, 11, 24)
+        val breakdown = PaycheckCalculator.calculateBreakdown(sampleBills, sampleDebts, config, today)
+
+        assertEquals(3, breakdown.upcomingPayPeriods.size)
+
+        // Period 1 (Nov 27 - Dec 11): Rent ($1200) + Electric ($150) = $1350
+        val p1 = breakdown.upcomingPayPeriods[0]
+        assertEquals(1, p1.periodIndex)
+        assertEquals(LocalDate.of(2026, 11, 27), p1.payDate)
+        assertEquals(LocalDate.of(2026, 12, 11), p1.nextPayDate)
+        assertEquals(1350.0, p1.totalBills, 0.01)
+        assertEquals(450.0, p1.safeToSpend, 0.01)
+
+        // Period 2 (Dec 11 - Dec 25): Internet ($75) = $75
+        val p2 = breakdown.upcomingPayPeriods[1]
+        assertEquals(2, p2.periodIndex)
+        assertEquals(LocalDate.of(2026, 12, 11), p2.payDate)
+        assertEquals(LocalDate.of(2026, 12, 25), p2.nextPayDate)
+        assertEquals(75.0, p2.totalBills, 0.01)
+        assertEquals(1725.0, p2.safeToSpend, 0.01)
     }
 }

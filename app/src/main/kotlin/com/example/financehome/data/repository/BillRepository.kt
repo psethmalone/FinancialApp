@@ -70,7 +70,7 @@ class BillRepository @Inject constructor(
         prefs.edit()
             .putString(KEY_FREQUENCY, config.frequency.name)
             .putFloat(KEY_TAKE_HOME, config.typicalTakeHomePay.toFloat())
-            .putLong(KEY_NEXT_PAY_DATE, config.nextPayDateEpochDay)
+            .putLong(KEY_NEXT_PAY_DATE, config.anchorPayDateEpochDay)
             .apply()
         _paycheckConfig.value = config
     }
@@ -83,12 +83,12 @@ class BillRepository @Inject constructor(
             PayFrequency.BI_WEEKLY
         }
         val takeHome = prefs.getFloat(KEY_TAKE_HOME, 1800f).toDouble()
-        val nextPayEpoch = prefs.getLong(KEY_NEXT_PAY_DATE, LocalDate.now().toEpochDay())
+        val anchorPayEpoch = prefs.getLong(KEY_NEXT_PAY_DATE, LocalDate.now().toEpochDay())
 
         return PaycheckConfig(
             frequency = freq,
             typicalTakeHomePay = takeHome,
-            nextPayDateEpochDay = nextPayEpoch
+            anchorPayDateEpochDay = anchorPayEpoch
         )
     }
 }

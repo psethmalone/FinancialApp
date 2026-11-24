@@ -17,7 +17,25 @@ enum class PayFrequency(
 data class PaycheckConfig(
     val frequency: PayFrequency = PayFrequency.BI_WEEKLY,
     val typicalTakeHomePay: Double = 1800.0,
-    val nextPayDateEpochDay: Long = LocalDate.now().toEpochDay()
+    val anchorPayDateEpochDay: Long = LocalDate.now().toEpochDay()
+) {
+    // Backwards compatibility property
+    val nextPayDateEpochDay: Long get() = anchorPayDateEpochDay
+}
+
+data class UpcomingBillScheduleItem(
+    val bill: Bill,
+    val dueDate: LocalDate,
+    val isPaid: Boolean = false
+)
+
+data class PayPeriodSchedule(
+    val periodIndex: Int,
+    val payDate: LocalDate,
+    val nextPayDate: LocalDate,
+    val bills: List<UpcomingBillScheduleItem>,
+    val totalBills: Double,
+    val safeToSpend: Double
 )
 
 data class PaycheckBreakdown(
@@ -30,6 +48,16 @@ data class PaycheckBreakdown(
     val dailySafeToSpend: Double,
     val isSurplus: Boolean,
     val deficitAmount: Double,
-    val threePaycheckMonths: List<String>,
-    val upcomingBillsInPeriod: List<Bill>
-)
+    val currentPayDate: LocalDate,
+    val followingPayDate: LocalDate,
+    val daysUntilPay: Long,
+    val windowBillsTotal: Double,
+    val billsDueInPeriod: List<UpcomingBillScheduleItem>,
+    val windowVariance: Double,
+    val recommendedBuffer: Double,
+    val upcomingPayPeriods: List<PayPeriodSchedule>,
+    val threePaycheckMonths: List<String>
+) {
+    // Convenience property for backwards compatibility with any existing call site
+    val upcomingBillsInPeriod: List<Bill> get() = billsDueInPeriod.map { it.bill }
+}

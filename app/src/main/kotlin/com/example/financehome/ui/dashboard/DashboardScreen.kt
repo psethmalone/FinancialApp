@@ -1,6 +1,7 @@
 package com.example.financehome.ui.dashboard
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -26,6 +27,8 @@ import com.example.financehome.data.model.TransactionType
 import com.example.financehome.ui.analytics.AnalyticsScreen
 import com.example.financehome.ui.theme.ColorExpense
 import com.example.financehome.ui.theme.ColorIncome
+import com.example.financehome.ui.transactions.PREDEFINED_CATEGORIES
+import com.example.financehome.ui.transactions.TransactionDetailSheet
 import com.example.financehome.ui.update.UpdateDialog
 import java.text.NumberFormat
 import java.time.Instant
@@ -44,12 +47,17 @@ enum class DashboardTab(val label: String, val icon: ImageVector) {
 fun DashboardScreen(
     viewModel: DashboardViewModel,
     onNavigateToAddTransaction: () -> Unit,
-    onNavigateToTransactions: () -> Unit,
     onNavigateToDebts: () -> Unit,
     onNavigateToSwipeCategorize: () -> Unit,
+    onNavigateToTransactions: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var selectedDashboardTab by remember { mutableStateOf(DashboardTab.OVERVIEW) }
+    var selectedTransactionForDetail by remember { mutableStateOf<Transaction?>(null) }
+
+    val searchQuery by viewModel.searchQuery.collectAsState()
+    val selectedCategory by viewModel.selectedCategory.collectAsState()
+    val filteredTransactions by viewModel.filteredTransactions.collectAsState()
 
     val uncategorizedCount by viewModel.uncategorizedCount.collectAsState()
     val recentTransactions by viewModel.recentTransactions.collectAsState()
@@ -434,31 +442,101 @@ fun DashboardScreen(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     items(categoryTotals.take(5)) { cat ->
-                                        CategoryChip(categoryTotal = cat, currencyFormat = currencyFormat)
+                                        CategoryChip(
+                                            categoryTotal = cat,
+                                            currencyFormat = currencyFormat,
+                                            isSelected = selectedCategory == cat.category,
+                                            onClick = { viewModel.onCategorySelect(cat.category) }
+                                        )
                                     }
                                 }
                             }
                         }
 
-                        // Recent Transactions Section Header
+                        // Full Searchable Transactions & Activity Section
                         item {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = "Recent Activity",
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                                )
-                                TextButton(onClick = onNavigateToTransactions) {
-                                    Text("See All")
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = "Transactions & Activity",
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                    )
+                                    if (filteredTransactions.isNotEmpty()) {
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = MaterialTheme.colorScheme.primaryContainer
+                                        ) {
+                                            Text(
+                                                text = "${filteredTransactions.size}",
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                                if (selectedCategory != null || searchQuery.isNotEmpty()) {
+                                    TextButton(onClick = {
+                                        viewModel.onSearchQueryChange("")
+                                        viewModel.onCategorySelect(null)
+                                    }) {
+                                        Text("Clear Filters")
+                                    }
                                 }
                             }
                         }
 
-                        // Recent Transactions List
-                        if (recentTransactions.isEmpty()) {
+                        // Search Input
+                        item {
+                            OutlinedTextField(
+                                value = searchQuery,
+                                onValueChange = { viewModel.onSearchQueryChange(it) },
+                                placeholder = { Text("Search by merchant, category, notes...") },
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                trailingIcon = {
+                                    if (searchQuery.isNotEmpty()) {
+                                        IconButton(onClick = { viewModel.onSearchQueryChange("") }) {
+                                            Icon(Icons.Default.Clear, contentDescription = "Clear search")
+                                        }
+                                    }
+                                },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+
+                        // Category Filter Chips
+                        item {
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                item {
+                                    FilterChip(
+                                        selected = selectedCategory == null,
+                                        onClick = { viewModel.onCategorySelect(null) },
+                                        label = { Text("All") }
+                                    )
+                                }
+                                items(PREDEFINED_CATEGORIES) { cat ->
+                                    FilterChip(
+                                        selected = selectedCategory == cat,
+                                        onClick = { viewModel.onCategorySelect(cat) },
+                                        label = { Text(cat) }
+                                    )
+                                }
+                            }
+                        }
+
+                        // Filtered Transactions List
+                        if (filteredTransactions.isEmpty()) {
                             item {
                                 Card(
                                     modifier = Modifier.fillMaxWidth(),
@@ -474,19 +552,23 @@ fun DashboardScreen(
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
                                         Icon(
-                                            Icons.Default.NotificationsActive,
+                                            Icons.Default.SearchOff,
                                             contentDescription = null,
                                             tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(36.dp)
                                         )
                                         Spacer(modifier = Modifier.height(8.dp))
                                         Text(
-                                            text = "No transactions detected yet",
+                                            text = if (searchQuery.isNotBlank() || selectedCategory != null)
+                                                "No matching transactions found"
+                                            else "No transactions detected yet",
                                             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
                                         )
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Text(
-                                            text = "Transactions from Cash App, Ally, and other banks will appear here automatically when notifications arrive.",
+                                            text = if (searchQuery.isNotBlank() || selectedCategory != null)
+                                                "Try adjusting your search terms or category filter."
+                                            else "Transactions will appear here automatically when notifications arrive or when you add them manually.",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -495,8 +577,12 @@ fun DashboardScreen(
                                 }
                             }
                         } else {
-                            items(recentTransactions, key = { it.id }) { transaction ->
-                                TransactionItemRow(transaction = transaction, currencyFormat = currencyFormat)
+                            items(filteredTransactions, key = { it.id }) { transaction ->
+                                TransactionItemRow(
+                                    transaction = transaction,
+                                    currencyFormat = currencyFormat,
+                                    modifier = Modifier.clickable { selectedTransactionForDetail = transaction }
+                                )
                             }
                         }
 
@@ -517,6 +603,26 @@ fun DashboardScreen(
         }
     }
 
+    if (selectedTransactionForDetail != null) {
+        TransactionDetailSheet(
+            transaction = selectedTransactionForDetail!!,
+            currencyFormat = currencyFormat,
+            onDismiss = { selectedTransactionForDetail = null },
+            onUpdateCategory = { newCategory ->
+                viewModel.updateTransactionCategory(selectedTransactionForDetail!!, newCategory)
+                selectedTransactionForDetail = null
+            },
+            onToggleDiscretionary = { isDisc ->
+                viewModel.toggleDiscretionary(selectedTransactionForDetail!!, isDisc)
+                selectedTransactionForDetail = selectedTransactionForDetail?.copy(isDiscretionary = isDisc)
+            },
+            onDelete = {
+                viewModel.deleteTransaction(selectedTransactionForDetail!!)
+                selectedTransactionForDetail = null
+            }
+        )
+    }
+
     if (showUpdateDialog && availableUpdate != null) {
         val info = availableUpdate!!
         UpdateDialog(
@@ -531,11 +637,15 @@ fun DashboardScreen(
 @Composable
 fun CategoryChip(
     categoryTotal: CategoryTotal,
-    currencyFormat: NumberFormat
+    currencyFormat: NumberFormat,
+    isSelected: Boolean = false,
+    onClick: () -> Unit = {}
 ) {
     Surface(
+        onClick = onClick,
         shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer
+        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
