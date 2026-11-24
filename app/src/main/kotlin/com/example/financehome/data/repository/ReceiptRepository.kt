@@ -123,6 +123,20 @@ class ReceiptRepository @Inject constructor(
         return receiptDao.getReceiptItemsForTransactionSync(transactionId)
     }
 
+    suspend fun parseReceiptFromUri(imageUriString: String): ParsedReceipt = withContext(Dispatchers.IO) {
+        val imageUri = Uri.parse(imageUriString)
+        val inputImage = InputImage.fromFilePath(context, imageUri)
+        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        val visionText = recognizer.process(inputImage).awaitResult()
+        parser.parse(visionText.text)
+    }
+
+    suspend fun insertReceiptItems(items: List<ReceiptItem>) = withContext(Dispatchers.IO) {
+        if (items.isNotEmpty()) {
+            receiptDao.insertReceiptItems(items)
+        }
+    }
+
     fun getAllCategorySpends(): Flow<List<CategorySpendTotal>> {
         return receiptDao.getAllCategorySpends()
     }

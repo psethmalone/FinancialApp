@@ -148,4 +148,49 @@ class TransactionsViewModel @Inject constructor(
     fun removeReceipt(transactionId: String) {
         viewModelScope.launch { receiptRepo.removeReceipt(transactionId) }
     }
+
+    suspend fun scanReceiptOnly(imageUriString: String): ParsedReceipt {
+        return receiptRepo.parseReceiptFromUri(imageUriString)
+    }
+
+    fun addTransactionWithReceipt(
+        amount: Double,
+        merchant: String,
+        category: String,
+        type: TransactionType,
+        notes: String?,
+        isDiscretionary: Boolean,
+        receiptImageUri: String?,
+        receiptItems: List<ReceiptItem>
+    ) {
+        viewModelScope.launch {
+            val transactionId = UUID.randomUUID().toString()
+            val transaction = Transaction(
+                id = transactionId,
+                amount = amount,
+                merchant = merchant.trim(),
+                category = category.trim().ifEmpty { "Uncategorized" },
+                type = type,
+                source = TransactionSource.MANUAL,
+                timestampMillis = System.currentTimeMillis(),
+                rawNotificationText = null,
+                notes = notes?.trim()?.ifEmpty { null },
+                isDiscretionary = isDiscretionary,
+                isSynced = false,
+                receiptImageUri = receiptImageUri,
+                hasItemizedReceipt = receiptItems.isNotEmpty()
+            )
+            transactionRepo.insertTransaction(transaction)
+
+            if (receiptItems.isNotEmpty()) {
+                val itemsWithId = receiptItems.map {
+                    it.copy(
+                        id = UUID.randomUUID().toString(),
+                        transactionId = transactionId
+                    )
+                }
+                receiptRepo.insertReceiptItems(itemsWithId)
+            }
+        }
+    }
 }

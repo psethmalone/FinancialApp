@@ -1,12 +1,22 @@
 package com.example.financehome.service
 
 import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.os.Build
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
+import androidx.core.app.NotificationCompat
+import com.example.financehome.MainActivity
+import com.example.financehome.R
 import com.example.financehome.data.local.AppDatabase
 import com.example.financehome.data.model.Transaction
 import com.example.financehome.data.model.TransactionSource
+import com.example.financehome.data.model.TransactionType
 import com.example.financehome.data.repository.NotificationLogRepository
 import com.example.financehome.domain.AutoCategorizer
 import dagger.hilt.EntryPoint
@@ -165,6 +175,10 @@ class FinanceNotificationListenerService : NotificationListenerService() {
         )
 
         transactionDao.insertTransaction(transaction)
+        if (transaction.type == TransactionType.DEBIT) {
+            showReceiptPromptNotification(transaction)
+        }
+
         logRepo?.logEvent(
             packageName = packageName,
             summaryText = "${parsed.merchant}: \$${parsed.amount} (${match.category})",
@@ -172,5 +186,45 @@ class FinanceNotificationListenerService : NotificationListenerService() {
             isSuccess = true
         )
         Log.i(TAG, "Successfully captured transaction: ${parsed.merchant} \$${parsed.amount}")
+    }
+
+    private fun showReceiptPromptNotification(transaction: Transaction) {
+        val channelId = "receipt_prompts"
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                channelId,
+                "Receipt Reminders",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Reminds you to scan receipts for new bank transactions"
+            }
+            manager.createNotificationChannel(channel)
+        }
+
+        val intent = Intent(applicationContext, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(MainActivity.EXTRA_TRANSACTION_ID, transaction.id)
+            putExtra(MainActivity.EXTRA_OPEN_RECEIPT_CAPTURE, true)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            applicationContext,
+            transaction.id.hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val formattedAmount = String.format(java.util.Locale.US, "$%.2f", transaction.amount)
+        val notification = NotificationCompat.Builder(applicationContext, channelId)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("New Expense: $formattedAmount at ${transaction.merchant}")
+            .setContentText("Tap to scan or attach receipt to itemize groceries & fuel")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        manager.notify(transaction.id.hashCode(), notification)
     }
 }

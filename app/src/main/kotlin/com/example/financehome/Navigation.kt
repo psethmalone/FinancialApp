@@ -19,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.financehome.data.model.Debt
+import com.example.financehome.data.model.ReceiptItem
+import com.example.financehome.data.model.Transaction
 import com.example.financehome.ui.categorize.SwipeCategorizeScreen
 import com.example.financehome.ui.categorize.SwipeCategorizeViewModel
 import com.example.financehome.ui.csvimport.CsvImportScreen
@@ -35,8 +37,11 @@ import com.example.financehome.ui.settings.ManageRulesViewModel
 import com.example.financehome.ui.settings.SettingsScreen
 import com.example.financehome.ui.settings.SettingsViewModel
 import com.example.financehome.ui.transactions.AddTransactionScreen
+import com.example.financehome.ui.transactions.TransactionDetailSheet
 import com.example.financehome.ui.transactions.TransactionsScreen
 import com.example.financehome.ui.transactions.TransactionsViewModel
+import java.text.NumberFormat
+import java.util.Locale
 
 enum class MainTab(val label: String, val icon: ImageVector) {
     DASHBOARD("Home", Icons.Default.Dashboard),
@@ -46,7 +51,11 @@ enum class MainTab(val label: String, val icon: ImageVector) {
 }
 
 @Composable
-fun AppNavigation(modifier: Modifier = Modifier) {
+fun AppNavigation(
+    pendingTransactionId: String? = null,
+    onClearPendingTransaction: () -> Unit = {},
+    modifier: Modifier = Modifier
+) {
     var selectedTab by remember { mutableStateOf(MainTab.DASHBOARD) }
     var showAddTransactionScreen by remember { mutableStateOf(false) }
     var selectedDebtDetail by remember { mutableStateOf<Debt?>(null) }
@@ -63,6 +72,20 @@ fun AppNavigation(modifier: Modifier = Modifier) {
     val csvImportViewModel: CsvImportViewModel = viewModel()
     val swipeCategorizeViewModel: SwipeCategorizeViewModel = viewModel()
     val manageRulesViewModel: ManageRulesViewModel = viewModel()
+
+    val allTransactions by transactionsViewModel.transactions.collectAsState()
+    var deepLinkedTransaction by remember { mutableStateOf<Transaction?>(null) }
+
+    // Handle deep link from notification
+    LaunchedEffect(pendingTransactionId, allTransactions) {
+        if (!pendingTransactionId.isNullOrBlank()) {
+            val match = allTransactions.firstOrNull { it.id == pendingTransactionId }
+            if (match != null) {
+                deepLinkedTransaction = match
+                onClearPendingTransaction()
+            }
+        }
+    }
 
     // Overlay full-screen sub-screens if active
     when {
@@ -81,16 +104,21 @@ fun AppNavigation(modifier: Modifier = Modifier) {
         showAddTransactionScreen -> {
             AddTransactionScreen(
                 onDismiss = { showAddTransactionScreen = false },
-                onSaveTransaction = { amount, merchant, category, type, notes, isDiscretionary ->
-                    transactionsViewModel.addManualTransaction(
+                onSaveTransaction = { amount, merchant, category, type, notes, isDiscretionary, receiptUri, receiptItems ->
+                    transactionsViewModel.addTransactionWithReceipt(
                         amount = amount,
                         merchant = merchant,
                         category = category,
                         type = type,
                         notes = notes,
-                        isDiscretionary = isDiscretionary
+                        isDiscretionary = isDiscretionary,
+                        receiptImageUri = receiptUri,
+                        receiptItems = receiptItems
                     )
-                }
+                },
+                onCreateCaptureUri = { transactionsViewModel.createReceiptCaptureFile() },
+                onSavePickedUri = { uri -> transactionsViewModel.savePickedImageToInternalStorage(uri) },
+                onScanReceipt = { uriStr -> transactionsViewModel.scanReceiptOnly(uriStr) }
             )
         }
         selectedDebtDetail != null -> {
@@ -156,5 +184,38 @@ fun AppNavigation(modifier: Modifier = Modifier) {
                 }
             }
         }
+    }
+
+    if (deepLinkedTransaction != null) {
+        val currentTx = deepLinkedTransaction!!
+        val receiptItems by transactionsViewModel.getReceiptItems(currentTx.id).collectAsState(initial = emptyList<ReceiptItem>())
+        val isScanning by transactionsViewModel.isScanningReceipt.collectAsState()
+
+        TransactionDetailSheet(
+            transaction = currentTx,
+            receiptItems = receiptItems,
+            isScanning = isScanning,
+            currencyFormat = NumberFormat.getCurrencyInstance(Locale.US),
+            onDismiss = { deepLinkedTransaction = null },
+            onUpdateCategory = { newCategory ->
+                transactionsViewModel.updateTransactionCategory(currentTx, newCategory)
+                deepLinkedTransaction = null
+            },
+            onToggleDiscretionary = { isDisc ->
+                transactionsViewModel.toggleDiscretionary(currentTx, isDisc)
+                deepLinkedTransaction = deepLinkedTransaction?.copy(isDiscretionary = isDisc)
+            },
+            onDelete = {
+                transactionsViewModel.deleteTransaction(currentTx)
+                deepLinkedTransaction = null
+            },
+            onCreateCaptureUri = { transactionsViewModel.createReceiptCaptureFile() },
+            onSavePickedUri = { uri -> transactionsViewModel.savePickedImageToInternalStorage(uri) },
+            onAttachReceipt = { uriStr -> transactionsViewModel.attachReceipt(currentTx.id, uriStr) },
+            onAddItem = { item -> transactionsViewModel.addReceiptItem(item) },
+            onUpdateItem = { item -> transactionsViewModel.updateReceiptItem(item) },
+            onDeleteItem = { item -> transactionsViewModel.deleteReceiptItem(item) },
+            onRemoveReceipt = { transactionsViewModel.removeReceipt(currentTx.id) }
+        )
     }
 }

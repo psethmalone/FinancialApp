@@ -1,25 +1,34 @@
 package com.example.financehome.ui.categorize
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.financehome.data.model.CategoryRule
+import com.example.financehome.data.model.ReceiptItem
 import com.example.financehome.data.model.Transaction
+import com.example.financehome.data.repository.ReceiptRepository
 import com.example.financehome.data.repository.TransactionRepository
+import com.example.financehome.service.ParsedReceipt
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.io.File
 import java.util.UUID
 import javax.inject.Inject
 
 @HiltViewModel
 class SwipeCategorizeViewModel @Inject constructor(
-    private val transactionRepo: TransactionRepository
+    private val transactionRepo: TransactionRepository,
+    private val receiptRepo: ReceiptRepository
 ) : ViewModel() {
+
+    val isScanningReceipt = MutableStateFlow(false)
 
     val uncategorizedTransactions: StateFlow<List<Transaction>> =
         transactionRepo.getUncategorizedTransactions()
@@ -87,5 +96,62 @@ class SwipeCategorizeViewModel @Inject constructor(
                 _batchMessage.value = null
             }
         }
+    }
+
+    fun updateTransactionCategory(transaction: Transaction, newCategory: String) {
+        viewModelScope.launch {
+            transactionRepo.updateTransaction(transaction.copy(category = newCategory))
+        }
+    }
+
+    fun toggleDiscretionary(transaction: Transaction, isDiscretionary: Boolean) {
+        viewModelScope.launch {
+            transactionRepo.updateTransaction(transaction.copy(isDiscretionary = isDiscretionary))
+        }
+    }
+
+    fun deleteTransaction(transaction: Transaction) {
+        viewModelScope.launch {
+            transactionRepo.deleteTransaction(transaction)
+        }
+    }
+
+    fun getReceiptItems(transactionId: String): Flow<List<ReceiptItem>> =
+        receiptRepo.getReceiptItems(transactionId)
+
+    fun createReceiptCaptureFile(): Pair<File, Uri> =
+        receiptRepo.createReceiptCaptureFile()
+
+    suspend fun savePickedImageToInternalStorage(uri: Uri): String =
+        receiptRepo.savePickedImageToInternalStorage(uri)
+
+    fun attachReceipt(transactionId: String, imageUriString: String, onDone: ((Result<ParsedReceipt>) -> Unit)? = null) {
+        viewModelScope.launch {
+            isScanningReceipt.value = true
+            try {
+                val parsed = receiptRepo.processAndAttachReceipt(imageUriString, transactionId)
+                onDone?.invoke(Result.success(parsed))
+            } catch (e: Exception) {
+                onDone?.invoke(Result.failure(e))
+            } finally {
+                isScanningReceipt.value = false
+            }
+        }
+    }
+
+    fun addReceiptItem(item: ReceiptItem) {
+        viewModelScope.launch { receiptRepo.addReceiptItem(item) }
+    }
+
+    fun updateReceiptItem(item: ReceiptItem) {
+        viewModelScope.launch { receiptRepo.updateReceiptItem(item) }
+    }
+
+    fun deleteReceiptItem(item: ReceiptItem) {
+        viewModelScope.launch { receiptRepo.deleteReceiptItem(item) }
+    }
+
+    fun removeReceipt(transactionId: String) {
+        viewModelScope.launch { receiptRepo.removeReceipt(transactionId) }
     }
 }

@@ -71,6 +71,8 @@ fun DashboardScreen(
     val availableUpdate by viewModel.availableUpdate.collectAsState()
     val downloadState by viewModel.downloadState.collectAsState()
     val showUpdateDialog by viewModel.showUpdateDialog.collectAsState()
+    val missingReceipts by viewModel.transactionsMissingReceipts.collectAsState()
+    val showMissingReceiptsBanner by viewModel.showMissingReceiptsBanner.collectAsState()
 
     val currencyFormat = NumberFormat.getCurrencyInstance(Locale.US)
     val todayFormatted = LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE, MMM d"))
@@ -275,6 +277,102 @@ fun DashboardScreen(
                                             contentDescription = null,
                                             tint = MaterialTheme.colorScheme.onTertiaryContainer
                                         )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Missing Receipts Card (prompt to attach receipts to recent spends)
+                        if (showMissingReceiptsBanner && missingReceipts.isNotEmpty()) {
+                            item {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                                    )
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(16.dp),
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Text("🧾", fontSize = 20.sp)
+                                                Column {
+                                                    Text(
+                                                        text = "Attach Receipts (${missingReceipts.size} recent)",
+                                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                                    )
+                                                    Text(
+                                                        text = "Auto-track grocery & fuel costs for recent card spends",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
+                                                    )
+                                                }
+                                            }
+                                            IconButton(onClick = { viewModel.dismissMissingReceiptsBanner() }) {
+                                                Icon(
+                                                    Icons.Default.Close,
+                                                    contentDescription = "Dismiss",
+                                                    tint = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f),
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+
+                                        LazyRow(
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                            contentPadding = PaddingValues(vertical = 4.dp)
+                                        ) {
+                                            items(missingReceipts, key = { it.id }) { tx ->
+                                                Surface(
+                                                    shape = RoundedCornerShape(12.dp),
+                                                    color = MaterialTheme.colorScheme.surface,
+                                                    modifier = Modifier.clickable { selectedTransactionForDetail = tx }
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                    ) {
+                                                        Column {
+                                                            Text(
+                                                                text = tx.merchant,
+                                                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                                                color = MaterialTheme.colorScheme.onSurface
+                                                            )
+                                                            Text(
+                                                                text = "${currencyFormat.format(tx.amount)} • ${formatTimestamp(tx.timestampMillis)}",
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                            )
+                                                        }
+                                                        FilledTonalButton(
+                                                            onClick = { selectedTransactionForDetail = tx },
+                                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                                            shape = RoundedCornerShape(8.dp),
+                                                            modifier = Modifier.height(32.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(14.dp))
+                                                            Spacer(modifier = Modifier.width(4.dp))
+                                                            Text("Scan", style = MaterialTheme.typography.labelSmall)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }

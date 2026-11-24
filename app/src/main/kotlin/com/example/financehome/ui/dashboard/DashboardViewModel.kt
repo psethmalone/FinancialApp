@@ -203,6 +203,20 @@ class DashboardViewModel @Inject constructor(
                 initialValue = 0.0
             )
 
+    val showMissingReceiptsBanner = MutableStateFlow(true)
+
+    val transactionsMissingReceipts: StateFlow<List<Transaction>> =
+        transactionRepo.getTransactionsMissingReceipts(limit = 6)
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = emptyList()
+            )
+
+    fun dismissMissingReceiptsBanner() {
+        showMissingReceiptsBanner.value = false
+    }
+
     val netPosition: StateFlow<Double> =
         combine(transactionRepo.getAllTransactions(), totalDebt) { transactions, debt ->
             val totalIncome = transactions.filter { it.type == TransactionType.CREDIT }.sumOf { it.amount }

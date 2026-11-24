@@ -41,6 +41,18 @@ interface TransactionDao {
     @Query(
         """
         SELECT * FROM transactions
+        WHERE receiptImageUri IS NULL
+          AND hasItemizedReceipt = 0
+          AND type = 'DEBIT'
+        ORDER BY timestampMillis DESC
+        LIMIT :limit
+        """
+    )
+    fun getTransactionsMissingReceipts(limit: Int = 10): Flow<List<Transaction>>
+
+    @Query(
+        """
+        SELECT * FROM transactions
         WHERE timestampMillis >= :startMs AND timestampMillis <= :endMs
         ORDER BY timestampMillis DESC
         """

@@ -33,11 +33,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.financehome.data.model.ReceiptItem
 import com.example.financehome.data.model.Transaction
 import com.example.financehome.ui.dashboard.formatTimestamp
 import com.example.financehome.ui.theme.ColorExpense
 import com.example.financehome.ui.theme.ColorIncome
 import com.example.financehome.ui.theme.ColorWarning
+import com.example.financehome.ui.transactions.TransactionDetailSheet
 import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.util.Locale
@@ -73,6 +75,7 @@ fun SwipeCategorizeScreen(
     val uncategorized by viewModel.uncategorizedTransactions.collectAsState()
     val batchMessage by viewModel.batchMessage.collectAsState()
     val currencyFormat = NumberFormat.getCurrencyInstance(Locale.US)
+    var selectedTransactionForReceipt by remember { mutableStateOf<Transaction?>(null) }
 
     Scaffold(
         topBar = {
@@ -159,10 +162,44 @@ fun SwipeCategorizeScreen(
                             isRecurringRent = isRent,
                             rememberRule = true
                         )
-                    }
+                    },
+                    onOpenReceipt = { tx -> selectedTransactionForReceipt = tx }
                 )
             }
         }
+    }
+
+    if (selectedTransactionForReceipt != null) {
+        val currentTx = selectedTransactionForReceipt!!
+        val receiptItems by viewModel.getReceiptItems(currentTx.id).collectAsState(initial = emptyList<ReceiptItem>())
+        val isScanning by viewModel.isScanningReceipt.collectAsState()
+
+        TransactionDetailSheet(
+            transaction = currentTx,
+            receiptItems = receiptItems,
+            isScanning = isScanning,
+            currencyFormat = currencyFormat,
+            onDismiss = { selectedTransactionForReceipt = null },
+            onUpdateCategory = { newCategory ->
+                viewModel.updateTransactionCategory(currentTx, newCategory)
+                selectedTransactionForReceipt = null
+            },
+            onToggleDiscretionary = { isDisc ->
+                viewModel.toggleDiscretionary(currentTx, isDisc)
+                selectedTransactionForReceipt = selectedTransactionForReceipt?.copy(isDiscretionary = isDisc)
+            },
+            onDelete = {
+                viewModel.deleteTransaction(currentTx)
+                selectedTransactionForReceipt = null
+            },
+            onCreateCaptureUri = { viewModel.createReceiptCaptureFile() },
+            onSavePickedUri = { uri -> viewModel.savePickedImageToInternalStorage(uri) },
+            onAttachReceipt = { uriStr -> viewModel.attachReceipt(currentTx.id, uriStr) },
+            onAddItem = { item -> viewModel.addReceiptItem(item) },
+            onUpdateItem = { item -> viewModel.updateReceiptItem(item) },
+            onDeleteItem = { item -> viewModel.deleteReceiptItem(item) },
+            onRemoveReceipt = { viewModel.removeReceipt(currentTx.id) }
+        )
     }
 }
 
@@ -171,7 +208,8 @@ fun CategoryFirstSwipeCard(
     transaction: Transaction,
     sameMerchantCount: Int,
     currencyFormat: NumberFormat,
-    onClassified: (category: String, isDiscretionary: Boolean, isRent: Boolean) -> Unit
+    onClassified: (category: String, isDiscretionary: Boolean, isRent: Boolean) -> Unit,
+    onOpenReceipt: (Transaction) -> Unit = {}
 ) {
     // Default selected category
     var selectedCategory by remember(transaction.id) {
@@ -319,6 +357,40 @@ fun CategoryFirstSwipeCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    val hasReceipt = transaction.receiptImageUri != null || transaction.hasItemizedReceipt
+                    if (hasReceipt) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.clickable { onOpenReceipt(transaction) }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text("🧾", fontSize = 13.sp)
+                                Text(
+                                    text = "Receipt Attached",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = { onOpenReceipt(transaction) },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Attach / Scan Receipt", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
 
                     if (sameMerchantCount > 1) {
                         Spacer(modifier = Modifier.height(4.dp))

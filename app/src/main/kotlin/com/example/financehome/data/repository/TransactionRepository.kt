@@ -32,6 +32,9 @@ class TransactionRepository @Inject constructor(
             list.filter { it.category.equals("Uncategorized", ignoreCase = true) }
         }
 
+    fun getTransactionsMissingReceipts(limit: Int = 10): Flow<List<Transaction>> =
+        transactionDao.getTransactionsMissingReceipts(limit)
+
     fun getSpendingTotalByCategory(): Flow<List<CategoryTotal>> =
         transactionDao.getSpendingTotalByCategory()
 
