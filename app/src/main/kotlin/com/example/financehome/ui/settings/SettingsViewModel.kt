@@ -27,14 +27,20 @@ import javax.inject.Inject
 
 import com.example.financehome.data.repository.NotificationFilterRepository
 import com.example.financehome.data.repository.NotificationLogRepository
+import com.example.financehome.data.repository.SpendingAlertRepository
+import com.example.financehome.domain.SafeToSpendAlertLevel
+import com.example.financehome.domain.SpendingAlertConfig
 import com.example.financehome.service.NotificationParser
+import com.example.financehome.service.SpendingAlertManager
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val transactionRepo: TransactionRepository,
     private val appUpdateRepo: AppUpdateRepository,
     private val notificationLogRepo: NotificationLogRepository,
-    private val notificationFilterRepo: NotificationFilterRepository
+    private val notificationFilterRepo: NotificationFilterRepository,
+    private val spendingAlertRepo: SpendingAlertRepository,
+    private val spendingAlertManager: SpendingAlertManager
 ) : ViewModel() {
 
     val isCloudSyncEnabled = MutableStateFlow(false)
@@ -43,7 +49,16 @@ class SettingsViewModel @Inject constructor(
 
     val notificationLogs = notificationLogRepo.logs
     val notificationFilterConfig = notificationFilterRepo.config
+    val spendingAlertConfig = spendingAlertRepo.config
     val simulationFeedback = MutableStateFlow<String?>(null)
+
+    fun updateSpendingAlertConfig(config: SpendingAlertConfig) {
+        spendingAlertRepo.updateConfig(config)
+    }
+
+    fun sendTestSpendingAlert(level: SafeToSpendAlertLevel = SafeToSpendAlertLevel.LOW_WARNING) {
+        spendingAlertManager.sendTestAlert(level)
+    }
 
     val updateCheckResult = MutableStateFlow<UpdateCheckResult>(UpdateCheckResult.Idle)
     val downloadState = MutableStateFlow<DownloadState>(DownloadState.Idle)

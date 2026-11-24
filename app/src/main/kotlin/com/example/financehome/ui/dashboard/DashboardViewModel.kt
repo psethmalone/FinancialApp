@@ -27,7 +27,15 @@ import java.time.LocalDate
 import android.net.Uri
 import com.example.financehome.data.model.ReceiptItem
 import com.example.financehome.data.repository.ReceiptRepository
+import com.example.financehome.data.model.Bill
+import com.example.financehome.data.model.Debt
+import com.example.financehome.data.repository.BillRepository
+import com.example.financehome.data.repository.SpendingAlertRepository
+import com.example.financehome.data.repository.WageRepository
+import com.example.financehome.domain.*
+import com.example.financehome.service.SpendingAlertManager
 import com.example.financehome.service.ParsedReceipt
+import java.time.ZoneId
 import java.io.File
 import javax.inject.Inject
 
@@ -36,13 +44,97 @@ class DashboardViewModel @Inject constructor(
     private val transactionRepo: TransactionRepository,
     private val debtRepo: DebtRepository,
     private val appUpdateRepo: AppUpdateRepository,
-    private val receiptRepo: ReceiptRepository
+    private val receiptRepo: ReceiptRepository,
+    private val billRepo: BillRepository,
+    private val wageRepo: WageRepository,
+    private val spendingAlertRepo: SpendingAlertRepository,
+    private val spendingAlertManager: SpendingAlertManager
 ) : ViewModel() {
 
     val isScanningReceipt = MutableStateFlow(false)
     val availableUpdate = MutableStateFlow<AppUpdateInfo?>(null)
     val downloadState = MutableStateFlow<DownloadState>(DownloadState.Idle)
     val showUpdateDialog = MutableStateFlow(false)
+
+    val spendingAlertConfig = spendingAlertRepo.config
+
+    val safeToSpendStatus: StateFlow<SafeToSpendStatus> =
+        combine(
+            billRepo.paycheckConfig,
+            billRepo.getAllBills(),
+            debtRepo.getAllDebts(),
+            wageRepo.wageConfig,
+            spendingAlertRepo.config,
+            transactionRepo.getAllTransactions()
+        ) { args ->
+            val paycheckConfig = args[0] as PaycheckConfig
+            @Suppress("UNCHECKED_CAST")
+            val bills = args[1] as List<Bill>
+            @Suppress("UNCHECKED_CAST")
+            val debts = args[2] as List<Debt>
+            val wageConfig = args[3] as WageConfig
+            val alertConfig = args[4] as SpendingAlertConfig
+            @Suppress("UNCHECKED_CAST")
+            val allTxs = args[5] as List<Transaction>
+
+            val currentDate = LocalDate.now()
+            val wageEst = WageCalculator.calculateEstimate(wageConfig, paycheckConfig.frequency)
+            val baseWageEst = WageCalculator.calculateBaselineEstimate(wageConfig, paycheckConfig.frequency)
+
+            val currentTakeHome = if (wageConfig.autoSyncPaycheckPlanner) {
+                wageEst.effectiveTakeHomePay
+            } else {
+                paycheckConfig.typicalTakeHomePay
+            }
+            val baselineTakeHome = if (wageConfig.autoSyncPaycheckPlanner) {
+                baseWageEst.effectiveTakeHomePay
+            } else {
+                paycheckConfig.typicalTakeHomePay
+            }
+
+            val breakdown = PaycheckCalculator.calculateBreakdown(
+                bills = bills,
+                debts = debts,
+                config = paycheckConfig,
+                currentDate = currentDate,
+                currentTakeHomePay = currentTakeHome,
+                baselineTakeHomePay = baselineTakeHome,
+                isCurrentPeriodOvertime = wageEst.overtimeHours > 0.0,
+                currentPeriodOvertimeHours = wageEst.overtimeHours
+            )
+
+            val anchorPayDate = LocalDate.ofEpochDay(paycheckConfig.anchorPayDateEpochDay)
+            val cycleStart = PaycheckCalculator.calculateCurrentCycleStartDate(
+                anchorPayDate = anchorPayDate,
+                frequency = paycheckConfig.frequency,
+                currentDate = currentDate
+            )
+            val startMs = cycleStart.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+            val spentThisCycle = allTxs.filter {
+                it.type == TransactionType.DEBIT && it.timestampMillis >= startMs
+            }.sumOf { it.amount }
+
+            PaycheckCalculator.calculateSafeToSpendStatus(
+                breakdown = breakdown,
+                config = paycheckConfig,
+                spentThisCycle = spentThisCycle,
+                alertConfig = alertConfig,
+                currentDate = currentDate
+            )
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = SafeToSpendStatus.empty()
+        )
+
+    fun updateSpendingAlertConfig(config: SpendingAlertConfig) {
+        spendingAlertRepo.updateConfig(config)
+    }
+
+    fun sendTestSpendingAlert() {
+        spendingAlertManager.sendTestAlert()
+    }
 
     // Analytics state
     private val _selectedPeriod = MutableStateFlow(AnalyticsPeriod.THIS_MONTH)

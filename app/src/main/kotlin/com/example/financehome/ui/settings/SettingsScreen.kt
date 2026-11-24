@@ -27,6 +27,8 @@ import com.example.financehome.ui.theme.ColorExpense
 import com.example.financehome.ui.theme.ColorIncome
 import com.example.financehome.ui.update.UpdateDialog
 import java.io.File
+import java.text.NumberFormat
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,12 +53,14 @@ fun SettingsScreen(
 
     val notificationLogs by viewModel.notificationLogs.collectAsState()
     val notificationFilterConfig by viewModel.notificationFilterConfig.collectAsState()
+    val spendingAlertConfig by viewModel.spendingAlertConfig.collectAsState()
     val simulationFeedback by viewModel.simulationFeedback.collectAsState()
 
     var showCloudSyncDialog by remember { mutableStateOf(false) }
     var showEditRepoDialog by remember { mutableStateOf(false) }
     var showCustomSimulatorDialog by remember { mutableStateOf(false) }
     var showAppFilterDialog by remember { mutableStateOf(false) }
+    var showSpendingThresholdDialog by remember { mutableStateOf(false) }
     var editingRepoText by remember { mutableStateOf("") }
     var customSimulatorText by remember { mutableStateOf("") }
     var showLogsExpanded by remember { mutableStateOf(false) }
@@ -138,6 +142,16 @@ fun SettingsScreen(
                             Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Monitored Apps & SMS Rules (${notificationFilterConfig.monitoredPackages.size} apps)")
+                        }
+
+                        FilledTonalButton(
+                            onClick = { showSpendingThresholdDialog = true },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            val thresholdStr = NumberFormat.getCurrencyInstance(Locale.US).format(spendingAlertConfig.lowCushionThreshold)
+                            Text("Spending Alerts & Thresholds ($thresholdStr)")
                         }
 
                         if (!hasNotificationPermission) {
@@ -258,6 +272,15 @@ fun SettingsScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("Test Custom Notification Text...")
+                        }
+
+                        OutlinedButton(
+                            onClick = { viewModel.sendTestSpendingAlert() },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Simulate Safe-to-Spend Alert Notification")
                         }
 
                         // Recent Logs toggle
@@ -812,6 +835,20 @@ fun SettingsScreen(
             onRemoveKeyword = { viewModel.removeSmsKeyword(it) },
             onResetKeywords = { viewModel.resetSmsKeywords() },
             onAddCustomPackage = { viewModel.setPackageMonitored(it, true) }
+        )
+    }
+
+    if (showSpendingThresholdDialog) {
+        SpendingThresholdDialog(
+            currentConfig = spendingAlertConfig,
+            onDismiss = { showSpendingThresholdDialog = false },
+            onSave = { newConfig ->
+                viewModel.updateSpendingAlertConfig(newConfig)
+                showSpendingThresholdDialog = false
+            },
+            onSendTestAlert = {
+                viewModel.sendTestSpendingAlert()
+            }
         )
     }
 }

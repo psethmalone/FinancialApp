@@ -57,6 +57,8 @@ enum class MainTab(val label: String, val icon: ImageVector) {
 fun AppNavigation(
     pendingTransactionId: String? = null,
     onClearPendingTransaction: () -> Unit = {},
+    initialTabName: String? = null,
+    onClearInitialTab: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableStateOf(MainTab.DASHBOARD) }
@@ -78,6 +80,17 @@ fun AppNavigation(
 
     val allTransactions by transactionsViewModel.transactions.collectAsState()
     var deepLinkedTransaction by remember { mutableStateOf<Transaction?>(null) }
+
+    // Handle initial tab routing from notifications
+    LaunchedEffect(initialTabName) {
+        if (!initialTabName.isNullOrBlank()) {
+            val target = MainTab.values().firstOrNull { it.name.equals(initialTabName, ignoreCase = true) }
+            if (target != null) {
+                selectedTab = target
+                onClearInitialTab()
+            }
+        }
+    }
 
     // Handle deep link from notification
     LaunchedEffect(pendingTransactionId, allTransactions) {
@@ -168,7 +181,8 @@ fun AppNavigation(
                                 viewModel = dashboardViewModel,
                                 onNavigateToAddTransaction = { showAddTransactionScreen = true },
                                 onNavigateToDebts = { selectedTab = MainTab.DEBTS },
-                                onNavigateToSwipeCategorize = { showSwipeCategorizeScreen = true }
+                                onNavigateToSwipeCategorize = { showSwipeCategorizeScreen = true },
+                                onNavigateToCashFlow = { selectedTab = MainTab.CASH_FLOW }
                             )
                             MainTab.CASH_FLOW -> CashFlowScreen(
                                 viewModel = debtsViewModel

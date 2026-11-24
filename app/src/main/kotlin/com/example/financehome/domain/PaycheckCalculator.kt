@@ -206,6 +206,103 @@ object PaycheckCalculator {
     }
 
     /**
+     * Calculates the pay date preceding `payDate`.
+     */
+    fun calculatePreviousPayDate(payDate: LocalDate, frequency: PayFrequency): LocalDate {
+        return when (frequency) {
+            PayFrequency.BI_WEEKLY -> payDate.minusDays(14)
+            PayFrequency.WEEKLY -> payDate.minusDays(7)
+            PayFrequency.SEMI_MONTHLY -> {
+                val day = payDate.dayOfMonth
+                if (day > 15) {
+                    val first = (day - 15).coerceAtLeast(1)
+                    payDate.withDayOfMonth(first)
+                } else {
+                    val prevMonth = payDate.minusMonths(1)
+                    val second = (day + 15).coerceAtMost(prevMonth.lengthOfMonth())
+                    prevMonth.withDayOfMonth(second)
+                }
+            }
+            PayFrequency.MONTHLY -> {
+                val prevMonth = payDate.minusMonths(1)
+                prevMonth.withDayOfMonth(minOf(payDate.dayOfMonth, prevMonth.lengthOfMonth()))
+            }
+        }
+    }
+
+    /**
+     * Calculates the start date of the pay cycle that includes `currentDate`.
+     * If today IS payday, the new cycle starts today.
+     * Otherwise, the current cycle started on the payday immediately preceding the upcoming payday.
+     */
+    fun calculateCurrentCycleStartDate(
+        anchorPayDate: LocalDate,
+        frequency: PayFrequency,
+        currentDate: LocalDate = LocalDate.now()
+    ): LocalDate {
+        val nextPayDate = calculateNextPayDate(anchorPayDate, frequency, currentDate)
+        return if (nextPayDate == currentDate) {
+            currentDate
+        } else {
+            calculatePreviousPayDate(nextPayDate, frequency)
+        }
+    }
+
+    /**
+     * Calculates the real-time Safe-to-Spend status for the current pay cycle,
+     * deducting the actual spending incurred since the start of the cycle.
+     */
+    fun calculateSafeToSpendStatus(
+        breakdown: PaycheckBreakdown,
+        config: PaycheckConfig,
+        spentThisCycle: Double,
+        alertConfig: SpendingAlertConfig,
+        currentDate: LocalDate = LocalDate.now()
+    ): SafeToSpendStatus {
+        val initialCushion = breakdown.currentSafeToSpend
+        val remaining = initialCushion - spentThisCycle
+        val isDeficit = remaining < 0.0
+        val isLowWarning = !isDeficit && remaining <= alertConfig.lowCushionThreshold
+        val alertLevel = when {
+            isDeficit -> SafeToSpendAlertLevel.DEFICIT_STOP
+            isLowWarning -> SafeToSpendAlertLevel.LOW_WARNING
+            else -> SafeToSpendAlertLevel.HEALTHY
+        }
+
+        val spentPercentage = if (initialCushion > 0.0) {
+            (spentThisCycle / initialCushion).toFloat().coerceIn(0f, 2f)
+        } else {
+            if (spentThisCycle > 0.0) 1f else 0f
+        }
+
+        val daysUntilPay = breakdown.daysUntilPay
+        val dailyPaceRemaining = if (daysUntilPay > 0) {
+            maxOf(0.0, remaining / daysUntilPay)
+        } else {
+            0.0
+        }
+
+        val anchorPayDate = LocalDate.ofEpochDay(config.anchorPayDateEpochDay)
+        val cycleStartDate = calculateCurrentCycleStartDate(anchorPayDate, config.frequency, currentDate)
+        val nextPayDate = calculateNextPayDate(anchorPayDate, config.frequency, currentDate)
+
+        return SafeToSpendStatus(
+            initialCushion = initialCushion,
+            spentThisCycle = spentThisCycle,
+            remainingSafeToSpend = remaining,
+            spentPercentage = spentPercentage,
+            daysUntilPay = daysUntilPay,
+            dailyPaceRemaining = dailyPaceRemaining,
+            cycleStartDate = cycleStartDate,
+            nextPayDate = nextPayDate,
+            isDeficit = isDeficit,
+            isLowWarning = isLowWarning,
+            warningThreshold = alertConfig.lowCushionThreshold,
+            alertLevel = alertLevel
+        )
+    }
+
+    /**
      * Returns the set of day-of-month numbers (1..31) that are paydays in the given year and month.
      */
     fun getPayDatesForMonth(

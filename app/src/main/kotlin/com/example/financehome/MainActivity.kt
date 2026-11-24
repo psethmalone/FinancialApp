@@ -20,15 +20,18 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_TRANSACTION_ID = "com.example.financehome.EXTRA_TRANSACTION_ID"
         const val EXTRA_OPEN_RECEIPT_CAPTURE = "com.example.financehome.EXTRA_OPEN_RECEIPT_CAPTURE"
+        const val EXTRA_INITIAL_TAB = "com.example.financehome.EXTRA_INITIAL_TAB"
     }
 
     private val pendingTransactionId = mutableStateOf<String?>(null)
+    private val pendingInitialTab = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
         pendingTransactionId.value = intent?.getStringExtra(EXTRA_TRANSACTION_ID)
+        pendingInitialTab.value = intent?.getStringExtra(EXTRA_INITIAL_TAB)
 
         // Schedule periodic background refresh of SPY price cache and cloud sync
         DailySyncWorker.schedule(applicationContext)
@@ -41,7 +44,9 @@ class MainActivity : ComponentActivity() {
                 ) {
                     AppNavigation(
                         pendingTransactionId = pendingTransactionId.value,
-                        onClearPendingTransaction = { pendingTransactionId.value = null }
+                        onClearPendingTransaction = { pendingTransactionId.value = null },
+                        initialTabName = pendingInitialTab.value,
+                        onClearInitialTab = { pendingInitialTab.value = null }
                     )
                 }
             }
@@ -54,6 +59,10 @@ class MainActivity : ComponentActivity() {
         val txId = intent.getStringExtra(EXTRA_TRANSACTION_ID)
         if (!txId.isNullOrBlank()) {
             pendingTransactionId.value = txId
+        }
+        val tab = intent.getStringExtra(EXTRA_INITIAL_TAB)
+        if (!tab.isNullOrBlank()) {
+            pendingInitialTab.value = tab
         }
     }
 }

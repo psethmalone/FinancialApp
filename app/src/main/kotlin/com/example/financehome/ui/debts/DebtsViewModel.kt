@@ -17,10 +17,19 @@ import com.example.financehome.domain.PaycheckConfig
 import com.example.financehome.domain.WageCalculator
 import com.example.financehome.domain.WageConfig
 import com.example.financehome.domain.WageEstimate
+import com.example.financehome.data.model.Transaction
+import com.example.financehome.data.model.TransactionType
+import com.example.financehome.data.repository.TransactionRepository
+import com.example.financehome.data.repository.SpendingAlertRepository
+import com.example.financehome.domain.SafeToSpendStatus
+import com.example.financehome.domain.SpendingAlertConfig
+import com.example.financehome.service.SpendingAlertManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+import java.time.LocalDate
+import java.time.ZoneId
 import javax.inject.Inject
 
 data class PayoffSimulation(
@@ -36,7 +45,10 @@ data class PayoffSimulation(
 class DebtsViewModel @Inject constructor(
     private val debtRepo: DebtRepository,
     private val billRepo: BillRepository,
-    private val wageRepo: WageRepository
+    private val wageRepo: WageRepository,
+    private val transactionRepo: TransactionRepository,
+    private val spendingAlertRepo: SpendingAlertRepository,
+    private val spendingAlertManager: SpendingAlertManager
 ) : ViewModel() {
 
     // ── Debts ──────────────────────────────────────────────────────────────────
@@ -306,4 +318,50 @@ class DebtsViewModel @Inject constructor(
     fun resetPayPeriodHours() {
         wageRepo.resetForNextPayPeriod()
     }
+
+    // ── Safe-to-Spend Real-Time Burn & Alerts ────────────────────────────────────
+
+    val spendingAlertConfig: StateFlow<SpendingAlertConfig> = spendingAlertRepo.config
+
+    val safeToSpendStatus: StateFlow<SafeToSpendStatus> =
+        combine(
+            paycheckBreakdown,
+            paycheckConfig,
+            transactionRepo.getAllTransactions(),
+            spendingAlertConfig
+        ) { breakdown, config, allTxs, alertConfig ->
+            val currentDate = LocalDate.now()
+            val anchorPayDate = LocalDate.ofEpochDay(config.anchorPayDateEpochDay)
+            val cycleStart = PaycheckCalculator.calculateCurrentCycleStartDate(
+                anchorPayDate = anchorPayDate,
+                frequency = config.frequency,
+                currentDate = currentDate
+            )
+            val startMs = cycleStart.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+            val spentThisCycle = allTxs.filter {
+                it.type == TransactionType.DEBIT && it.timestampMillis >= startMs
+            }.sumOf { it.amount }
+
+            PaycheckCalculator.calculateSafeToSpendStatus(
+                breakdown = breakdown,
+                config = config,
+                spentThisCycle = spentThisCycle,
+                alertConfig = alertConfig,
+                currentDate = currentDate
+            )
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = SafeToSpendStatus.empty()
+        )
+
+    fun updateSpendingAlertConfig(config: SpendingAlertConfig) {
+        spendingAlertRepo.updateConfig(config)
+    }
+
+    fun sendTestSpendingAlert() {
+        spendingAlertManager.sendTestAlert()
+    }
 }
+

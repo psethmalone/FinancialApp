@@ -38,6 +38,7 @@ class FinanceNotificationListenerService : NotificationListenerService() {
         fun logRepository(): NotificationLogRepository
         fun portfolioRepository(): com.example.financehome.data.repository.PortfolioRepository
         fun filterRepository(): com.example.financehome.data.repository.NotificationFilterRepository
+        fun spendingAlertManager(): SpendingAlertManager
     }
 
     private val serviceJob = SupervisorJob()
@@ -47,6 +48,18 @@ class FinanceNotificationListenerService : NotificationListenerService() {
 
     companion object {
         private const val TAG = "FinanceNotification"
+    }
+
+    private fun getEntryPoint(): ServiceEntryPoint? {
+        return try {
+            EntryPointAccessors.fromApplication(
+                applicationContext,
+                ServiceEntryPoint::class.java
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get ServiceEntryPoint", e)
+            null
+        }
     }
 
     override fun onDestroy() {
@@ -66,15 +79,7 @@ class FinanceNotificationListenerService : NotificationListenerService() {
         val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
         val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
 
-        val entryPoint = try {
-            EntryPointAccessors.fromApplication(
-                applicationContext,
-                ServiceEntryPoint::class.java
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to get ServiceEntryPoint", e)
-            null
-        }
+        val entryPoint = getEntryPoint()
 
         val logRepo = entryPoint?.logRepository()
         val filterRepo = entryPoint?.filterRepository()
@@ -210,7 +215,12 @@ class FinanceNotificationListenerService : NotificationListenerService() {
 
         transactionDao.insertTransaction(transaction)
         if (transaction.type == TransactionType.DEBIT) {
-            showReceiptPromptNotification(transaction)
+            val alertManager = getEntryPoint()?.spendingAlertManager()
+            if (alertManager != null) {
+                alertManager.checkAndPostAlert(transaction)
+            } else {
+                showReceiptPromptNotification(transaction)
+            }
         }
 
         logRepo?.logEvent(

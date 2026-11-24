@@ -25,9 +25,13 @@ import com.example.financehome.data.local.CategoryTotal
 import com.example.financehome.data.model.ReceiptItem
 import com.example.financehome.data.model.Transaction
 import com.example.financehome.data.model.TransactionType
+import com.example.financehome.domain.SafeToSpendAlertLevel
+import com.example.financehome.domain.SafeToSpendStatus
 import com.example.financehome.ui.analytics.AnalyticsScreen
+import com.example.financehome.ui.settings.SpendingThresholdDialog
 import com.example.financehome.ui.theme.ColorExpense
 import com.example.financehome.ui.theme.ColorIncome
+import com.example.financehome.ui.theme.ColorWarning
 import com.example.financehome.ui.transactions.PREDEFINED_CATEGORIES
 import com.example.financehome.ui.transactions.TransactionDetailSheet
 import com.example.financehome.ui.update.UpdateDialog
@@ -51,10 +55,15 @@ fun DashboardScreen(
     onNavigateToDebts: () -> Unit,
     onNavigateToSwipeCategorize: () -> Unit,
     onNavigateToTransactions: () -> Unit = {},
+    onNavigateToCashFlow: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var selectedDashboardTab by remember { mutableStateOf(DashboardTab.OVERVIEW) }
     var selectedTransactionForDetail by remember { mutableStateOf<Transaction?>(null) }
+    var showSpendingThresholdDialog by remember { mutableStateOf(false) }
+
+    val safeToSpendStatus by viewModel.safeToSpendStatus.collectAsState()
+    val spendingAlertConfig by viewModel.spendingAlertConfig.collectAsState()
 
     val searchQuery by viewModel.searchQuery.collectAsState()
     val selectedCategory by viewModel.selectedCategory.collectAsState()
@@ -222,6 +231,16 @@ fun DashboardScreen(
                             .padding(horizontal = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
+                        // Real-Time Safe-to-Spend Live Burn & Pace Card
+                        item {
+                            SafeToSpendGaugeCard(
+                                status = safeToSpendStatus,
+                                currencyFormat = currencyFormat,
+                                onNavigateToCashFlow = onNavigateToCashFlow,
+                                onConfigureThreshold = { showSpendingThresholdDialog = true }
+                            )
+                        }
+
                         // Swipe to Categorize Card (shown if there are uncategorized transactions)
                         if (uncategorizedCount > 0) {
                             item {
@@ -743,6 +762,188 @@ fun DashboardScreen(
             onStartDownload = { viewModel.startDownload(info.downloadUrl) },
             onDismiss = { viewModel.dismissUpdateDialog() }
         )
+    }
+
+    if (showSpendingThresholdDialog) {
+        SpendingThresholdDialog(
+            currentConfig = spendingAlertConfig,
+            onDismiss = { showSpendingThresholdDialog = false },
+            onSave = { updated ->
+                viewModel.updateSpendingAlertConfig(updated)
+                showSpendingThresholdDialog = false
+            },
+            onSendTestAlert = {
+                viewModel.sendTestSpendingAlert()
+            }
+        )
+    }
+}
+
+@Composable
+fun SafeToSpendGaugeCard(
+    status: SafeToSpendStatus,
+    currencyFormat: NumberFormat,
+    onNavigateToCashFlow: () -> Unit,
+    onConfigureThreshold: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val statusLabel: String
+    val badgeColor: Color
+    val badgeTextColor: Color
+    val badgeIcon: ImageVector
+    when (status.alertLevel) {
+        SafeToSpendAlertLevel.DEFICIT_STOP -> {
+            statusLabel = "DEFICIT: STOP SPENDING"
+            badgeColor = MaterialTheme.colorScheme.errorContainer
+            badgeTextColor = MaterialTheme.colorScheme.onErrorContainer
+            badgeIcon = Icons.Default.Warning
+        }
+        SafeToSpendAlertLevel.LOW_WARNING -> {
+            statusLabel = "LOW CUSHION WARNING"
+            badgeColor = MaterialTheme.colorScheme.tertiaryContainer
+            badgeTextColor = MaterialTheme.colorScheme.onTertiaryContainer
+            badgeIcon = Icons.Default.Info
+        }
+        SafeToSpendAlertLevel.HEALTHY -> {
+            statusLabel = "SAFE-TO-SPEND HEALTHY"
+            badgeColor = MaterialTheme.colorScheme.secondaryContainer
+            badgeTextColor = MaterialTheme.colorScheme.onSecondaryContainer
+            badgeIcon = Icons.Default.CheckCircle
+        }
+    }
+
+    val progress = if (status.initialSafeToSpend > 0) {
+        (status.spentThisCycle / status.initialSafeToSpend).coerceIn(0.0, 1.0).toFloat()
+    } else {
+        if (status.spentThisCycle > 0) 1.0f else 0.0f
+    }
+
+    val progressColor = when (status.alertLevel) {
+        SafeToSpendAlertLevel.DEFICIT_STOP -> ColorExpense
+        SafeToSpendAlertLevel.LOW_WARNING -> ColorWarning
+        SafeToSpendAlertLevel.HEALTHY -> ColorIncome
+    }
+
+    Card(
+        onClick = onNavigateToCashFlow,
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    color = badgeColor,
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            badgeIcon,
+                            contentDescription = null,
+                            tint = badgeTextColor,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = statusLabel,
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = badgeTextColor
+                        )
+                    }
+                }
+
+                IconButton(
+                    onClick = onConfigureThreshold,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Tune,
+                        contentDescription = "Alert Thresholds",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+                text = "Safe-to-Spend Left",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                Text(
+                    text = currencyFormat.format(status.remainingSafeToSpend),
+                    style = MaterialTheme.typography.headlineMedium.copy(
+                        fontWeight = FontWeight.ExtraBold,
+                        color = when (status.alertLevel) {
+                            SafeToSpendAlertLevel.DEFICIT_STOP -> ColorExpense
+                            SafeToSpendAlertLevel.LOW_WARNING -> ColorWarning
+                            SafeToSpendAlertLevel.HEALTHY -> MaterialTheme.colorScheme.primary
+                        }
+                    )
+                )
+
+                if (status.daysRemainingInCycle > 0 && status.remainingSafeToSpend > 0) {
+                    Text(
+                        text = "${currencyFormat.format(status.dailyPace)}/day",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(8.dp)
+                    .clip(RoundedCornerShape(4.dp)),
+                color = progressColor,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Spent: ${currencyFormat.format(status.spentThisCycle)} of ${currencyFormat.format(status.initialSafeToSpend)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "${status.daysRemainingInCycle}d to payday (${status.nextPayDate.format(DateTimeFormatter.ofPattern("MMM d"))})",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
 }
 

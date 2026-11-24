@@ -61,6 +61,26 @@ interface TransactionDao {
 
     @Query(
         """
+        SELECT COALESCE(SUM(amount), 0.0)
+        FROM transactions
+        WHERE type = 'DEBIT'
+          AND timestampMillis >= :startMs AND timestampMillis <= :endMs
+        """
+    )
+    fun getSpendingBetween(startMs: Long, endMs: Long): Flow<Double>
+
+    @Query(
+        """
+        SELECT COALESCE(SUM(amount), 0.0)
+        FROM transactions
+        WHERE type = 'DEBIT'
+          AND timestampMillis >= :startMs AND timestampMillis <= :endMs
+        """
+    )
+    suspend fun getSpendingBetweenSync(startMs: Long, endMs: Long): Double
+
+    @Query(
+        """
         SELECT * FROM transactions
         WHERE category = :category
         ORDER BY timestampMillis DESC

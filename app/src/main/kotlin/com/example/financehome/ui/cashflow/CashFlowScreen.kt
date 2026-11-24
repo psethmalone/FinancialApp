@@ -24,9 +24,11 @@ import com.example.financehome.data.model.Bill
 import com.example.financehome.data.model.Debt
 import com.example.financehome.domain.*
 import com.example.financehome.ui.debts.DebtsViewModel
+import com.example.financehome.ui.settings.SpendingThresholdDialog
 import com.example.financehome.ui.theme.ColorExpense
 import com.example.financehome.ui.theme.ColorIncome
 import com.example.financehome.ui.theme.ColorWarning
+import androidx.compose.ui.graphics.Color
 import java.text.NumberFormat
 import java.time.LocalDate
 import java.time.YearMonth
@@ -46,10 +48,13 @@ fun CashFlowScreen(
     val wageConfig by viewModel.wageConfig.collectAsState()
     val wageEstimate by viewModel.wageEstimate.collectAsState()
     val baselineWageEstimate by viewModel.baselineWageEstimate.collectAsState()
+    val safeToSpendStatus by viewModel.safeToSpendStatus.collectAsState()
+    val spendingAlertConfig by viewModel.spendingAlertConfig.collectAsState()
 
     var showEditPaycheckDialog by remember { mutableStateOf(false) }
     var showEditWageDialog by remember { mutableStateOf(false) }
     var showVerifyPaydayDialog by remember { mutableStateOf(false) }
+    var showSpendingThresholdDialog by remember { mutableStateOf(false) }
 
     val currencyFormat = NumberFormat.getCurrencyInstance(Locale.US)
 
@@ -58,6 +63,9 @@ fun CashFlowScreen(
             TopAppBar(
                 title = { Text("Cash Flow & Payday", fontWeight = FontWeight.Bold) },
                 actions = {
+                    IconButton(onClick = { showSpendingThresholdDialog = true }) {
+                        Icon(Icons.Default.NotificationsActive, contentDescription = "Spending Alert Thresholds")
+                    }
                     IconButton(onClick = { showEditWageDialog = true }) {
                         Icon(Icons.Default.Tune, contentDescription = "Wage & Payday Settings")
                     }
@@ -81,8 +89,10 @@ fun CashFlowScreen(
                     config = paycheckConfig,
                     wageEstimate = wageEstimate,
                     baselineEstimate = baselineWageEstimate,
+                    safeToSpendStatus = safeToSpendStatus,
                     currencyFormat = currencyFormat,
-                    onEditPaycheck = { showEditPaycheckDialog = true }
+                    onEditPaycheck = { showEditPaycheckDialog = true },
+                    onConfigureThreshold = { showSpendingThresholdDialog = true }
                 )
             }
 
@@ -167,6 +177,20 @@ fun CashFlowScreen(
             }
         )
     }
+
+    if (showSpendingThresholdDialog) {
+        SpendingThresholdDialog(
+            currentConfig = spendingAlertConfig,
+            onDismiss = { showSpendingThresholdDialog = false },
+            onSave = { updated ->
+                viewModel.updateSpendingAlertConfig(updated)
+                showSpendingThresholdDialog = false
+            },
+            onSendTestAlert = {
+                viewModel.sendTestSpendingAlert()
+            }
+        )
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -179,8 +203,10 @@ fun NextPaydayHeroCard(
     config: PaycheckConfig,
     wageEstimate: WageEstimate,
     baselineEstimate: WageEstimate,
+    safeToSpendStatus: SafeToSpendStatus,
     currencyFormat: NumberFormat,
     onEditPaycheck: () -> Unit,
+    onConfigureThreshold: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val dtf = DateTimeFormatter.ofPattern("EEE, MMM d", Locale.US)
@@ -271,23 +297,86 @@ fun NextPaydayHeroCard(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.15f))
 
-            // Safe to spend remainder
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Safe-to-Spend this cycle:",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-                Text(
-                    text = "${currencyFormat.format(breakdown.perPaycheckSafeToSpend)} (${currencyFormat.format(breakdown.dailySafeToSpend)}/day)",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = if (breakdown.isSurplus) ColorIncome else ColorExpense
+            // Real-Time Safe-to-Spend Live Burn & Balance
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "Remaining Safe-to-Spend:",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        IconButton(
+                            onClick = onConfigureThreshold,
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Tune,
+                                contentDescription = "Alert Thresholds",
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = when (safeToSpendStatus.alertLevel) {
+                            SafeToSpendAlertLevel.DEFICIT_STOP -> MaterialTheme.colorScheme.error
+                            SafeToSpendAlertLevel.LOW_WARNING -> ColorWarning
+                            SafeToSpendAlertLevel.HEALTHY -> ColorIncome
+                        }
+                    ) {
+                        Text(
+                            text = when (safeToSpendStatus.alertLevel) {
+                                SafeToSpendAlertLevel.DEFICIT_STOP -> "DEFICIT STOP"
+                                SafeToSpendAlertLevel.LOW_WARNING -> "LOW CUSHION"
+                                SafeToSpendAlertLevel.HEALTHY -> "HEALTHY"
+                            },
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
+                            color = Color.White,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    Text(
+                        text = currencyFormat.format(safeToSpendStatus.remainingSafeToSpend),
+                        style = MaterialTheme.typography.headlineSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = when (safeToSpendStatus.alertLevel) {
+                                SafeToSpendAlertLevel.DEFICIT_STOP -> MaterialTheme.colorScheme.error
+                                SafeToSpendAlertLevel.LOW_WARNING -> ColorWarning
+                                SafeToSpendAlertLevel.HEALTHY -> ColorIncome
+                            }
+                        )
                     )
+
+                    if (safeToSpendStatus.daysRemainingInCycle > 0 && safeToSpendStatus.remainingSafeToSpend > 0) {
+                        Text(
+                            text = "${currencyFormat.format(safeToSpendStatus.dailyPace)}/day remaining",
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+
+                Text(
+                    text = "Initial Cushion: ${currencyFormat.format(safeToSpendStatus.initialSafeToSpend)} • Spent this cycle: ${currencyFormat.format(safeToSpendStatus.spentThisCycle)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
                 )
             }
         }

@@ -51,6 +51,12 @@ class TransactionRepository @Inject constructor(
         }
     }
 
+    fun getSpendingBetween(startMs: Long, endMs: Long): Flow<Double> =
+        transactionDao.getSpendingBetween(startMs, endMs)
+
+    suspend fun getSpendingBetweenSync(startMs: Long, endMs: Long): Double =
+        transactionDao.getSpendingBetweenSync(startMs, endMs)
+
     suspend fun insertTransaction(t: Transaction) = transactionDao.insertTransaction(t)
 
     suspend fun insertTransactions(list: List<Transaction>) = transactionDao.insertTransactions(list)
