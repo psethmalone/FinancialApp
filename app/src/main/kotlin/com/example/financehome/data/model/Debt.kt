@@ -1,4 +1,4 @@
-﻿package com.example.financehome.data.model
+package com.example.financehome.data.model
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
@@ -32,5 +32,8 @@ data class Debt(
     val minimumPayment: Double,
     val type: DebtType,
     val createdAtMillis: Long,
-    val isSynced: Boolean = false
+    val isSynced: Boolean = false,
+    val dueDayOfMonth: Int = 15,
+    val isPaidThisMonth: Boolean = false,
+    val lastPaidTimestampMillis: Long? = null
 )

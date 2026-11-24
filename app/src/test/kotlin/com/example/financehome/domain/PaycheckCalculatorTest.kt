@@ -177,12 +177,56 @@ class PaycheckCalculatorTest {
         assertEquals(1350.0, p1.totalBills, 0.01)
         assertEquals(450.0, p1.safeToSpend, 0.01)
 
-        // Period 2 (Dec 11 - Dec 25): Internet ($75) = $75
+        // Period 2 (Dec 11 - Dec 25): Internet ($75) + Credit Card ($175) + Auto Loan ($300) = $550 total obligations
         val p2 = breakdown.upcomingPayPeriods[1]
         assertEquals(2, p2.periodIndex)
         assertEquals(LocalDate.of(2026, 12, 11), p2.payDate)
         assertEquals(LocalDate.of(2026, 12, 25), p2.nextPayDate)
-        assertEquals(75.0, p2.totalBills, 0.01)
-        assertEquals(1725.0, p2.safeToSpend, 0.01)
+        assertEquals(550.0, p2.totalBills, 0.01)
+        assertEquals(550.0, p2.totalObligations, 0.01)
+        assertEquals(1250.0, p2.safeToSpend, 0.01)
+    }
+
+    @Test
+    fun testDebtsDueInPaycheckWindow() {
+        val bills = listOf(
+            Bill("1", "Rent", 1000.0, 1, "Housing")
+        )
+        val debts = listOf(
+            // Due on 5th (inside Nov 27 - Dec 11 window on Dec 5)
+            Debt("d1", "Credit Card", 2000.0, 2000.0, 0.20, 150.0, DebtType.CREDIT_CARD, 0L, dueDayOfMonth = 5),
+            // Due on 20th (outside window)
+            Debt("d2", "Student Loan", 8000.0, 8000.0, 0.06, 200.0, DebtType.LOAN, 0L, dueDayOfMonth = 20),
+            // Paid off debt (balance 0, should not appear in window obligations)
+            Debt("d3", "Paid Off Loan", 5000.0, 0.0, 0.05, 100.0, DebtType.LOAN, 0L, dueDayOfMonth = 5)
+        )
+
+        val config = PaycheckConfig(
+            frequency = PayFrequency.BI_WEEKLY,
+            typicalTakeHomePay = 1800.0,
+            anchorPayDateEpochDay = LocalDate.of(2026, 11, 27).toEpochDay()
+        )
+        val today = LocalDate.of(2026, 11, 24)
+        val breakdown = PaycheckCalculator.calculateBreakdown(bills, debts, config, today)
+
+        // Rent (Dec 1: $1000)
+        assertEquals(1000.0, breakdown.windowBillsTotal, 0.01)
+        // Debt d1 (Dec 5: $150)
+        assertEquals(150.0, breakdown.windowDebtsTotal, 0.01)
+        // Total obligations in window = $1150
+        assertEquals(1150.0, breakdown.windowObligationsTotal, 0.01)
+
+        // Check obligationsDueInPeriod list
+        assertEquals(2, breakdown.obligationsDueInPeriod.size)
+        val rentObligation = breakdown.obligationsDueInPeriod[0]
+        assertEquals("Rent", rentObligation.name)
+        assertEquals(ObligationType.BILL, rentObligation.type)
+        assertEquals(LocalDate.of(2026, 12, 1), rentObligation.dueDate)
+
+        val debtObligation = breakdown.obligationsDueInPeriod[1]
+        assertEquals("Credit Card", debtObligation.name)
+        assertEquals(ObligationType.DEBT, debtObligation.type)
+        assertEquals(LocalDate.of(2026, 12, 5), debtObligation.dueDate)
+        assertEquals(150.0, debtObligation.amount, 0.01)
     }
 }

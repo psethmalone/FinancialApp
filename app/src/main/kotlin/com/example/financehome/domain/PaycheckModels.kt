@@ -1,6 +1,7 @@
 package com.example.financehome.domain
 
 import com.example.financehome.data.model.Bill
+import com.example.financehome.data.model.Debt
 import java.time.LocalDate
 
 enum class PayFrequency(
@@ -23,6 +24,21 @@ data class PaycheckConfig(
     val nextPayDateEpochDay: Long get() = anchorPayDateEpochDay
 }
 
+enum class ObligationType { BILL, DEBT }
+
+data class UpcomingObligationItem(
+    val id: String,
+    val name: String,
+    val amount: Double,
+    val dueDayOfMonth: Int,
+    val dueDate: LocalDate,
+    val type: ObligationType,
+    val isPaid: Boolean = false,
+    val subtitle: String = "",
+    val originalBill: Bill? = null,
+    val originalDebt: Debt? = null
+)
+
 data class UpcomingBillScheduleItem(
     val bill: Bill,
     val dueDate: LocalDate,
@@ -33,10 +49,16 @@ data class PayPeriodSchedule(
     val periodIndex: Int,
     val payDate: LocalDate,
     val nextPayDate: LocalDate,
-    val bills: List<UpcomingBillScheduleItem>,
-    val totalBills: Double,
+    val obligations: List<UpcomingObligationItem>,
+    val totalObligations: Double,
     val safeToSpend: Double
-)
+) {
+    // Backwards compatibility properties
+    val bills: List<UpcomingBillScheduleItem>
+        get() = obligations.filter { it.type == ObligationType.BILL && it.originalBill != null }
+            .map { UpcomingBillScheduleItem(it.originalBill!!, it.dueDate, it.isPaid) }
+    val totalBills: Double get() = totalObligations
+}
 
 data class PaycheckBreakdown(
     val totalMonthlyBills: Double,
@@ -52,12 +74,19 @@ data class PaycheckBreakdown(
     val followingPayDate: LocalDate,
     val daysUntilPay: Long,
     val windowBillsTotal: Double,
-    val billsDueInPeriod: List<UpcomingBillScheduleItem>,
+    val windowDebtsTotal: Double,
+    val windowObligationsTotal: Double,
+    val obligationsDueInPeriod: List<UpcomingObligationItem>,
     val windowVariance: Double,
     val recommendedBuffer: Double,
     val upcomingPayPeriods: List<PayPeriodSchedule>,
     val threePaycheckMonths: List<String>
 ) {
-    // Convenience property for backwards compatibility with any existing call site
+    // Backwards compatibility properties
+    val billsDueInPeriod: List<UpcomingBillScheduleItem>
+        get() = obligationsDueInPeriod
+            .filter { it.type == ObligationType.BILL && it.originalBill != null }
+            .map { UpcomingBillScheduleItem(it.originalBill!!, it.dueDate, it.isPaid) }
+
     val upcomingBillsInPeriod: List<Bill> get() = billsDueInPeriod.map { it.bill }
 }

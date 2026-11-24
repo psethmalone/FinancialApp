@@ -7,11 +7,15 @@ import com.example.financehome.data.model.Debt
 import com.example.financehome.data.model.DebtType
 import com.example.financehome.data.repository.BillRepository
 import com.example.financehome.data.repository.DebtRepository
+import com.example.financehome.data.repository.WageRepository
 import com.example.financehome.domain.AmortizationRow
 import com.example.financehome.domain.DebtCalculator
 import com.example.financehome.domain.PaycheckBreakdown
 import com.example.financehome.domain.PaycheckCalculator
 import com.example.financehome.domain.PaycheckConfig
+import com.example.financehome.domain.WageCalculator
+import com.example.financehome.domain.WageConfig
+import com.example.financehome.domain.WageEstimate
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -30,7 +34,8 @@ data class PayoffSimulation(
 @HiltViewModel
 class DebtsViewModel @Inject constructor(
     private val debtRepo: DebtRepository,
-    private val billRepo: BillRepository
+    private val billRepo: BillRepository,
+    private val wageRepo: WageRepository
 ) : ViewModel() {
 
     // ── Debts ──────────────────────────────────────────────────────────────────
@@ -86,14 +91,34 @@ class DebtsViewModel @Inject constructor(
             initialValue = 0.0
         )
 
-    // ── Paycheck Cushion & Allocator ───────────────────────────────────────────
+    // ── Wage & Hours Worked Tracker ──────────────────────────────────────────
+
+    val wageConfig: StateFlow<WageConfig> =
+        wageRepo.wageConfig
 
     val paycheckConfig: StateFlow<PaycheckConfig> =
         billRepo.paycheckConfig
 
+    val wageEstimate: StateFlow<WageEstimate> =
+        combine(wageConfig, paycheckConfig) { wage, payConfig ->
+            WageCalculator.calculateEstimate(wage, payConfig.frequency)
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = WageCalculator.calculateEstimate(WageConfig())
+        )
+
+    // ── Paycheck Cushion & Allocator ───────────────────────────────────────────
+
     val paycheckBreakdown: StateFlow<PaycheckBreakdown> =
-        combine(bills, debts, paycheckConfig) { billList, debtList, config ->
-            PaycheckCalculator.calculateBreakdown(billList, debtList, config)
+        combine(bills, debts, paycheckConfig, wageEstimate, wageConfig) { billList, debtList, config, wageEst, wageCfg ->
+            val effectiveTakeHome = if (wageCfg.autoSyncPaycheckPlanner) {
+                wageEst.effectiveTakeHomePay
+            } else {
+                config.typicalTakeHomePay
+            }
+            val effectiveConfig = config.copy(typicalTakeHomePay = effectiveTakeHome)
+            PaycheckCalculator.calculateBreakdown(billList, debtList, effectiveConfig)
         }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -107,7 +132,8 @@ class DebtsViewModel @Inject constructor(
         balance: Double,
         aprPercent: Double,
         minimumPayment: Double,
-        type: DebtType
+        type: DebtType,
+        dueDayOfMonth: Int = 15
     ) {
         viewModelScope.launch {
             val aprFraction = aprPercent / 100.0
@@ -116,7 +142,8 @@ class DebtsViewModel @Inject constructor(
                 balance = balance,
                 apr = aprFraction,
                 minimumPayment = minimumPayment,
-                type = type
+                type = type,
+                dueDayOfMonth = dueDayOfMonth
             )
         }
     }
@@ -130,6 +157,12 @@ class DebtsViewModel @Inject constructor(
     fun deleteDebt(debt: Debt) {
         viewModelScope.launch {
             debtRepo.deleteDebt(debt)
+        }
+    }
+
+    fun toggleDebtPaid(debt: Debt) {
+        viewModelScope.launch {
+            debtRepo.toggleDebtPaid(debt)
         }
     }
 
@@ -194,5 +227,35 @@ class DebtsViewModel @Inject constructor(
 
     fun updatePaycheckConfig(config: PaycheckConfig) {
         billRepo.updatePaycheckConfig(config)
+    }
+
+    // ── Wage & Hours Actions ──────────────────────────────────────────────────
+
+    fun updateWageConfig(config: WageConfig) {
+        wageRepo.updateWageConfig(config)
+    }
+
+    fun setHours(week1: Double, week2: Double) {
+        wageRepo.setHours(week1, week2)
+    }
+
+    fun adjustWeek1Hours(delta: Double) {
+        val current = wageConfig.value
+        val newH = maxOf(0.0, current.week1Hours + delta)
+        wageRepo.setHours(newH, current.week2Hours)
+    }
+
+    fun adjustWeek2Hours(delta: Double) {
+        val current = wageConfig.value
+        val newH = maxOf(0.0, current.week2Hours + delta)
+        wageRepo.setHours(current.week1Hours, newH)
+    }
+
+    fun verifyPaycheck(actualAmount: Double) {
+        wageRepo.verifyPaycheck(actualAmount)
+    }
+
+    fun resetPayPeriodHours() {
+        wageRepo.resetForNextPayPeriod()
     }
 }

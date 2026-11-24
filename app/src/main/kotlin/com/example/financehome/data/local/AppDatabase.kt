@@ -19,7 +19,7 @@ import com.example.financehome.data.model.Transaction
         CategoryRule::class,
         Bill::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -34,6 +34,14 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         const val DATABASE_NAME = "financehome.db"
 
+        val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE debts ADD COLUMN dueDayOfMonth INTEGER NOT NULL DEFAULT 15")
+                db.execSQL("ALTER TABLE debts ADD COLUMN isPaidThisMonth INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE debts ADD COLUMN lastPaidTimestampMillis INTEGER")
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -44,6 +52,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     DATABASE_NAME
                 )
+                    .addMigrations(MIGRATION_3_4)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance

@@ -1,4 +1,4 @@
-﻿package com.example.financehome.data.local
+package com.example.financehome.data.local
 
 import androidx.room.Dao
 import androidx.room.Delete
@@ -51,4 +51,8 @@ interface DebtDao {
     /** Marks the debt with [id] as successfully synced. */
     @Query("UPDATE debts SET isSynced = 1 WHERE id = :id")
     suspend fun markSynced(id: String)
+
+    /** Marks the debt with [id] paid or unpaid for this billing cycle. */
+    @Query("UPDATE debts SET isPaidThisMonth = :isPaid, lastPaidTimestampMillis = :timestamp WHERE id = :id")
+    suspend fun markPaid(id: String, isPaid: Boolean, timestamp: Long?)
 }

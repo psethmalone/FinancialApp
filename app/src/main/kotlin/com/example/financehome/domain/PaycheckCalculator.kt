@@ -51,20 +51,26 @@ object PaycheckCalculator {
         val followingPayDate = calculateFollowingPayDate(currentPayDate, config.frequency)
         val daysUntilPay = ChronoUnit.DAYS.between(currentDate, currentPayDate).coerceAtLeast(0)
 
-        // Bills due in this exact pay window [currentPayDate, followingPayDate)
-        val billsDueInPeriod = getScheduledBillsInWindow(bills, currentPayDate, followingPayDate)
-        val windowBillsTotal = billsDueInPeriod.sumOf { it.bill.amount }
+        // Obligations (bills + debts) due in this exact pay window [currentPayDate, followingPayDate)
+        val obligationsDueInPeriod = getScheduledObligationsInWindow(bills, debts, currentPayDate, followingPayDate)
+        val windowBillsTotal = obligationsDueInPeriod.filter { it.type == ObligationType.BILL }.sumOf { it.amount }
+        val windowDebtsTotal = obligationsDueInPeriod.filter { it.type == ObligationType.DEBT }.sumOf { it.amount }
+        val windowObligationsTotal = windowBillsTotal + windowDebtsTotal
 
         // Variance between steady deposit and cash needed in this window
-        val windowVariance = perPaycheckReserve - windowBillsTotal
+        val windowVariance = perPaycheckReserve - windowObligationsTotal
 
         // Recommended buffer in bills checking account
-        val maxSingleBill = bills.maxOfOrNull { it.amount } ?: 0.0
-        val recommendedBuffer = maxOf(maxSingleBill, (windowBillsTotal - perPaycheckReserve).coerceAtLeast(0.0))
+        val maxSingleObligation = maxOf(
+            bills.maxOfOrNull { it.amount } ?: 0.0,
+            debts.maxOfOrNull { it.minimumPayment } ?: 0.0
+        )
+        val recommendedBuffer = maxOf(maxSingleObligation, (windowObligationsTotal - perPaycheckReserve).coerceAtLeast(0.0))
 
         // Multi-pay period forward projection (next 3 pay periods)
         val upcomingPayPeriods = projectUpcomingPayPeriods(
             bills = bills,
+            debts = debts,
             firstPayDate = currentPayDate,
             frequency = config.frequency,
             takeHomePay = config.typicalTakeHomePay,
@@ -92,7 +98,9 @@ object PaycheckCalculator {
             followingPayDate = followingPayDate,
             daysUntilPay = daysUntilPay,
             windowBillsTotal = windowBillsTotal,
-            billsDueInPeriod = billsDueInPeriod,
+            windowDebtsTotal = windowDebtsTotal,
+            windowObligationsTotal = windowObligationsTotal,
+            obligationsDueInPeriod = obligationsDueInPeriod,
             windowVariance = windowVariance,
             recommendedBuffer = recommendedBuffer,
             upcomingPayPeriods = upcomingPayPeriods,
@@ -222,26 +230,61 @@ object PaycheckCalculator {
     }
 
     /**
-     * Filters bills due between startDate and endDate (inclusive of startDate, exclusive of endDate)
-     * and maps each to a concrete `UpcomingBillScheduleItem` with its exact due date.
+     * Filters both bills and debts due between startDate and endDate (inclusive of startDate, exclusive of endDate)
+     * and maps each to a concrete `UpcomingObligationItem` with its exact due date.
      */
-    fun getScheduledBillsInWindow(
+    fun getScheduledObligationsInWindow(
         bills: List<Bill>,
+        debts: List<Debt>,
         startDate: LocalDate,
         endDate: LocalDate
-    ): List<UpcomingBillScheduleItem> {
-        val scheduled = mutableListOf<UpcomingBillScheduleItem>()
+    ): List<UpcomingObligationItem> {
+        val scheduled = mutableListOf<UpcomingObligationItem>()
 
+        // 1. Process Bills
         for (bill in bills) {
             var curr = startDate
             while (curr.isBefore(endDate)) {
                 val effectiveDueDay = minOf(bill.dueDayOfMonth, curr.lengthOfMonth())
                 if (curr.dayOfMonth == effectiveDueDay) {
                     scheduled.add(
-                        UpcomingBillScheduleItem(
-                            bill = bill,
+                        UpcomingObligationItem(
+                            id = bill.id,
+                            name = bill.name,
+                            amount = bill.amount,
+                            dueDayOfMonth = bill.dueDayOfMonth,
                             dueDate = curr,
-                            isPaid = bill.isPaidThisMonth
+                            type = ObligationType.BILL,
+                            isPaid = bill.isPaidThisMonth,
+                            subtitle = bill.category,
+                            originalBill = bill
+                        )
+                    )
+                }
+                curr = curr.plusDays(1)
+            }
+        }
+
+        // 2. Process Debts (only accounts with an active balance and minimum payment)
+        for (debt in debts) {
+            if (debt.currentBalance <= 0.0 || debt.minimumPayment <= 0.0) continue
+            var curr = startDate
+            while (curr.isBefore(endDate)) {
+                val effectiveDueDay = minOf(debt.dueDayOfMonth, curr.lengthOfMonth())
+                if (curr.dayOfMonth == effectiveDueDay) {
+                    val debtTypeName = debt.type.name.replace('_', ' ').lowercase()
+                        .replaceFirstChar { it.uppercase() }
+                    scheduled.add(
+                        UpcomingObligationItem(
+                            id = debt.id,
+                            name = debt.name,
+                            amount = debt.minimumPayment,
+                            dueDayOfMonth = debt.dueDayOfMonth,
+                            dueDate = curr,
+                            type = ObligationType.DEBT,
+                            isPaid = debt.isPaidThisMonth,
+                            subtitle = "$debtTypeName • Min Payment",
+                            originalDebt = debt
                         )
                     )
                 }
@@ -250,6 +293,20 @@ object PaycheckCalculator {
         }
 
         return scheduled.sortedBy { it.dueDate }
+    }
+
+    /**
+     * Filters bills due between startDate and endDate (inclusive of startDate, exclusive of endDate)
+     * and maps each to a concrete `UpcomingBillScheduleItem` with its exact due date.
+     */
+    fun getScheduledBillsInWindow(
+        bills: List<Bill>,
+        startDate: LocalDate,
+        endDate: LocalDate
+    ): List<UpcomingBillScheduleItem> {
+        return getScheduledObligationsInWindow(bills, emptyList(), startDate, endDate)
+            .filter { it.type == ObligationType.BILL && it.originalBill != null }
+            .map { UpcomingBillScheduleItem(it.originalBill!!, it.dueDate, it.isPaid) }
     }
 
     /**
@@ -264,10 +321,11 @@ object PaycheckCalculator {
     }
 
     /**
-     * Projects forward multi-paycheck schedules (e.g. next 3 pay periods) with bills mapped to each check.
+     * Projects forward multi-paycheck schedules (e.g. next 3 pay periods) with bills and debts mapped to each check.
      */
     fun projectUpcomingPayPeriods(
         bills: List<Bill>,
+        debts: List<Debt> = emptyList(),
         firstPayDate: LocalDate,
         frequency: PayFrequency,
         takeHomePay: Double,
@@ -278,17 +336,17 @@ object PaycheckCalculator {
 
         for (i in 0 until periodCount) {
             val next = calculateFollowingPayDate(start, frequency)
-            val windowBills = getScheduledBillsInWindow(bills, start, next)
-            val totalBills = windowBills.sumOf { it.bill.amount }
-            val safeToSpend = takeHomePay - totalBills
+            val windowObligations = getScheduledObligationsInWindow(bills, debts, start, next)
+            val totalObligations = windowObligations.sumOf { it.amount }
+            val safeToSpend = takeHomePay - totalObligations
 
             list.add(
                 PayPeriodSchedule(
                     periodIndex = i + 1,
                     payDate = start,
                     nextPayDate = next,
-                    bills = windowBills,
-                    totalBills = totalBills,
+                    obligations = windowObligations,
+                    totalObligations = totalObligations,
                     safeToSpend = safeToSpend
                 )
             )

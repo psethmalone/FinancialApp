@@ -1,4 +1,4 @@
-﻿package com.example.financehome.data.repository
+package com.example.financehome.data.repository
 
 import com.example.financehome.data.local.DebtDao
 import com.example.financehome.data.model.Debt
@@ -43,6 +43,7 @@ class DebtRepository @Inject constructor(
         apr: Double,
         minimumPayment: Double,
         type: DebtType,
+        dueDayOfMonth: Int = 15
     ) {
         val debt = Debt(
             id = UUID.randomUUID().toString(),
@@ -54,6 +55,8 @@ class DebtRepository @Inject constructor(
             type = type,
             createdAtMillis = System.currentTimeMillis(),
             isSynced = false,
+            dueDayOfMonth = dueDayOfMonth.coerceIn(1, 31),
+            isPaidThisMonth = false
         )
         debtDao.insertDebt(debt)
     }
@@ -61,4 +64,10 @@ class DebtRepository @Inject constructor(
     suspend fun updateDebt(debt: Debt) = debtDao.updateDebt(debt)
 
     suspend fun deleteDebt(debt: Debt) = debtDao.deleteDebt(debt)
+
+    suspend fun toggleDebtPaid(debt: Debt) {
+        val newPaid = !debt.isPaidThisMonth
+        val timestamp = if (newPaid) System.currentTimeMillis() else null
+        debtDao.markPaid(debt.id, newPaid, timestamp)
+    }
 }
