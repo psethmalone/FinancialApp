@@ -360,7 +360,9 @@ fun CategoryFirstSwipeCard(
                     Text(
                         text = formatTimestamp(transaction.timestampMillis),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        softWrap = false
                     )
 
                     Spacer(modifier = Modifier.height(6.dp))

@@ -128,7 +128,10 @@ class DashboardViewModel @Inject constructor(
             val startMs = cycleStart.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
             val spentThisCycle = allTxs.filter {
-                it.type == TransactionType.DEBIT && it.timestampMillis >= startMs
+                it.type == TransactionType.DEBIT &&
+                it.timestampMillis >= startMs &&
+                it.linkedBillId == null &&
+                it.linkedDebtId == null
             }.sumOf { it.amount }
 
             PaycheckCalculator.calculateSafeToSpendStatus(
@@ -531,6 +534,12 @@ class DashboardViewModel @Inject constructor(
                 isDiscretionary = true,
                 noReceiptNeeded = false
             )
+        }
+    }
+
+    fun toggleBillPaid(bill: Bill, targetDate: LocalDate? = null) {
+        viewModelScope.launch {
+            billRepo.toggleBillPaid(bill, targetDate)
         }
     }
 }

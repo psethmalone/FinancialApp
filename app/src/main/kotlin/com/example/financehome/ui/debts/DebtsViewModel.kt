@@ -287,7 +287,8 @@ class DebtsViewModel @Inject constructor(
                 notes = note,
                 isDiscretionary = false,
                 isSynced = false,
-                noReceiptNeeded = true
+                noReceiptNeeded = true,
+                linkedDebtId = debt.id
             )
             transactionRepo.insertTransaction(tx)
         }
@@ -346,20 +347,15 @@ class DebtsViewModel @Inject constructor(
         }
     }
 
-    fun toggleBillPaid(bill: Bill) {
+    fun toggleBillPaid(bill: Bill, targetDate: LocalDate? = null) {
         viewModelScope.launch {
-            billRepo.toggleBillPaid(bill)
+            billRepo.toggleBillPaid(bill, targetDate)
         }
     }
 
-    fun payBill(bill: Bill) {
+    fun payBill(bill: Bill, targetDate: LocalDate? = null) {
         viewModelScope.launch {
-            billRepo.updateBill(
-                bill.copy(
-                    isPaidThisMonth = true,
-                    lastPaidTimestampMillis = System.currentTimeMillis()
-                )
-            )
+            billRepo.markBillPaidForCycle(bill, dueToSettle = targetDate ?: bill.getEffectiveNextDueDate())
             val tx = Transaction(
                 id = UUID.randomUUID().toString(),
                 amount = bill.amount,
@@ -372,7 +368,8 @@ class DebtsViewModel @Inject constructor(
                 notes = "Bill Payment: ${bill.name}",
                 isDiscretionary = false,
                 isSynced = false,
-                noReceiptNeeded = true
+                noReceiptNeeded = true,
+                linkedBillId = bill.id
             )
             transactionRepo.insertTransaction(tx)
         }
@@ -433,7 +430,10 @@ class DebtsViewModel @Inject constructor(
             val startMs = cycleStart.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
             val spentThisCycle = allTxs.filter {
-                it.type == TransactionType.DEBIT && it.timestampMillis >= startMs
+                it.type == TransactionType.DEBIT &&
+                it.timestampMillis >= startMs &&
+                it.linkedBillId == null &&
+                it.linkedDebtId == null
             }.sumOf { it.amount }
 
             PaycheckCalculator.calculateSafeToSpendStatus(

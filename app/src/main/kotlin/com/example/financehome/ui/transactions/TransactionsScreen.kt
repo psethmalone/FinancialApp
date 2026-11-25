@@ -361,61 +361,79 @@ fun TransactionRowItem(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                             maxLines = 1,
+                            softWrap = false,
                             overflow = TextOverflow.Ellipsis
                         )
                         if (hasReceipt) {
                             Text(
                                 text = "• 🧾 Receipt",
                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                color = MaterialTheme.colorScheme.secondary
+                                color = MaterialTheme.colorScheme.secondary,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         } else if (transaction.noReceiptNeeded) {
                             Text(
                                 text = "• No Receipt",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.outline
+                                color = MaterialTheme.colorScheme.outline,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                         if (transaction.linkedBillId != null) {
                             Text(
                                 text = "• 📄 Bill",
                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                color = MaterialTheme.colorScheme.primary
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         } else if (transaction.linkedDebtId != null) {
                             Text(
                                 text = "• 💳 Debt",
                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                color = MaterialTheme.colorScheme.secondary
+                                color = MaterialTheme.colorScheme.secondary,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                         if (transaction.isDiscretionary && isDebit) {
                             Text(
                                 text = "• Discretionary",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.tertiary
+                                color = MaterialTheme.colorScheme.tertiary,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
-                        Text(
-                            text = "• $dateFormatted",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
                 }
             }
 
-            Text(
-                text = amountFormatted,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = if (isDebit) ColorExpense else ColorIncome
-                ),
-                maxLines = 1,
-                softWrap = false,
-                textAlign = TextAlign.End,
+            Column(
+                horizontalAlignment = Alignment.End,
                 modifier = Modifier.padding(start = 8.dp)
-            )
+            ) {
+                Text(
+                    text = amountFormatted,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = if (isDebit) ColorExpense else ColorIncome
+                    ),
+                    maxLines = 1,
+                    softWrap = false,
+                    textAlign = TextAlign.End
+                )
+                Text(
+                    text = dateFormatted,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false,
+                    textAlign = TextAlign.End
+                )
+            }
         }
     }
 }

@@ -779,7 +779,9 @@ fun PortfolioTradeItem(
                         Text(
                             text = formatTimestamp(trade.timestampMillis),
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.outline
+                            color = MaterialTheme.colorScheme.outline,
+                            maxLines = 1,
+                            softWrap = false
                         )
                         if (trade.source == TradeSource.NOTIFICATION) {
                             Text(

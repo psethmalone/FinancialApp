@@ -50,9 +50,8 @@ data class Bill(
         } catch (_: Exception) {
             currentDate
         }
-        return if (currentDate.isAfter(thisMonthDue)) {
-            val nextMonth = currentDate.plusMonths(1)
-            nextMonth.withDayOfMonth(minOf(dueDayOfMonth, nextMonth.lengthOfMonth()))
+        return if (isPaidThisMonth) {
+            advanceDueDate(thisMonthDue)
         } else {
             thisMonthDue
         }
@@ -69,6 +68,10 @@ data class Bill(
         }
         if (nextDueDateEpochDay > 0L) {
             return date.isBefore(LocalDate.ofEpochDay(nextDueDateEpochDay))
+        }
+        // Fallback for bills where single-cycle tracking is not yet initialized
+        if (date.year == currentDate.year && date.monthValue == currentDate.monthValue) {
+            return isPaidThisMonth
         }
         return false
     }

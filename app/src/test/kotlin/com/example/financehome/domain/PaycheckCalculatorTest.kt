@@ -574,5 +574,77 @@ class PaycheckCalculatorTest {
         assertTrue(paidBill.isPaidForDate(LocalDate.of(2026, 12, 1)))
         assertFalse(paidBill.isPaidForDate(LocalDate.of(2026, 12, 15)))
     }
+
+    @Test
+    fun testOverdueUnpaidBillEffectiveDueDateDoesNotSkipCurrentMonth() {
+        val today = LocalDate.of(2026, 11, 25)
+        val overdueBill = Bill(
+            id = "b_overdue",
+            name = "Water Bill",
+            amount = 65.0,
+            dueDayOfMonth = 10,
+            category = "Utilities",
+            isPaidThisMonth = false,
+            nextDueDateEpochDay = 0L
+        )
+
+        // Prior bug: Because today (Nov 25) > Nov 10, getEffectiveNextDueDate erroneously skipped to Dec 10!
+        // Fixed behavior: An overdue unpaid bill in the current month must resolve to Nov 10 so paying it settles November.
+        val effectiveDue = overdueBill.getEffectiveNextDueDate(today)
+        assertEquals(LocalDate.of(2026, 11, 10), effectiveDue)
+        assertFalse(overdueBill.isPaidForDate(LocalDate.of(2026, 11, 10), today))
+
+        // If it was already paid this month, it advances to Dec 10
+        val paidBill = overdueBill.copy(isPaidThisMonth = true)
+        val paidEffectiveDue = paidBill.getEffectiveNextDueDate(today)
+        assertEquals(LocalDate.of(2026, 12, 10), paidEffectiveDue)
+        assertTrue(paidBill.isPaidForDate(LocalDate.of(2026, 11, 10), today))
+    }
+
+    @Test
+    fun testUnpaidWindowObligationsDecreaseWhenSettled() {
+        val nov20 = LocalDate.of(2026, 11, 20)
+        val bill = Bill(
+            id = "b1",
+            name = "Phone",
+            amount = 100.0,
+            dueDayOfMonth = 25,
+            category = "Utilities",
+            nextDueDateEpochDay = LocalDate.of(2026, 11, 25).toEpochDay()
+        )
+        val config = PaycheckConfig(
+            frequency = PayFrequency.BI_WEEKLY,
+            typicalTakeHomePay = 2000.0,
+            anchorPayDateEpochDay = LocalDate.of(2026, 11, 20).toEpochDay() // pay cycle: Nov 20 to Dec 4
+        )
+
+        val breakdownInitial = PaycheckCalculator.calculateBreakdown(
+            bills = listOf(bill),
+            debts = emptyList(),
+            config = config,
+            currentDate = nov20
+        )
+
+        assertEquals(100.0, breakdownInitial.windowObligationsTotal, 0.01)
+        assertEquals(100.0, breakdownInitial.unpaidWindowObligationsTotal, 0.01)
+
+        // Settle the bill
+        val settledBill = bill.copy(
+            nextDueDateEpochDay = LocalDate.of(2026, 12, 25).toEpochDay(),
+            lastSettledDateEpochDay = LocalDate.of(2026, 11, 25).toEpochDay(),
+            isPaidThisMonth = true
+        )
+
+        val breakdownAfter = PaycheckCalculator.calculateBreakdown(
+            bills = listOf(settledBill),
+            debts = emptyList(),
+            config = config,
+            currentDate = nov20
+        )
+
+        // Window total is still 100, but unpaid is now 0.0
+        assertEquals(100.0, breakdownAfter.windowObligationsTotal, 0.01)
+        assertEquals(0.0, breakdownAfter.unpaidWindowObligationsTotal, 0.01)
+    }
 }
 

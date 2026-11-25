@@ -320,7 +320,7 @@ fun DashboardScreen(
                             UnifiedMonthlyHeroCard(
                                 outlook = monthlyOutlook,
                                 currencyFormat = currencyFormat,
-                                onToggleBillPaid = { bill -> viewModel.toggleBillPaid(bill) },
+                                onToggleBillPaid = { bill, date -> viewModel.toggleBillPaid(bill, date) },
                                 onNavigateToCashFlow = { onNavigateToCashFlow(false) }
                             )
                         }
@@ -471,6 +471,7 @@ fun DashboardScreen(
                                                                 style = MaterialTheme.typography.labelSmall,
                                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                                 maxLines = 1,
+                                                                softWrap = false,
                                                                 overflow = TextOverflow.Ellipsis
                                                             )
                                                         }
@@ -794,7 +795,7 @@ fun DashboardScreen(
 fun UnifiedMonthlyHeroCard(
     outlook: DashboardMonthlyOutlook,
     currencyFormat: NumberFormat,
-    onToggleBillPaid: (Bill) -> Unit,
+    onToggleBillPaid: (Bill, LocalDate) -> Unit,
     onNavigateToCashFlow: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1150,7 +1151,7 @@ fun UnifiedMonthlyHeroCard(
                     ) {
                         if (nextEvent.originalBill != null && !nextEvent.isPaid) {
                             FilledTonalButton(
-                                onClick = { onToggleBillPaid(nextEvent.originalBill) },
+                                onClick = { onToggleBillPaid(nextEvent.originalBill, nextEvent.date) },
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier.height(28.dp)
@@ -1259,7 +1260,7 @@ fun UnifiedMonthlyHeroCard(
                                         }
                                     } else {
                                         OutlinedButton(
-                                            onClick = { onToggleBillPaid(event.originalBill) },
+                                            onClick = { onToggleBillPaid(event.originalBill, event.date) },
                                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                             shape = RoundedCornerShape(6.dp),
                                             modifier = Modifier.height(26.dp)
@@ -1384,46 +1385,53 @@ fun TransactionItemRow(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                             maxLines = 1,
+                            softWrap = false,
                             overflow = TextOverflow.Ellipsis
                         )
                         if (transaction.receiptImageUri != null || transaction.hasItemizedReceipt) {
                             Text(
                                 text = "• 🧾 Receipt",
                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                color = MaterialTheme.colorScheme.secondary
+                                color = MaterialTheme.colorScheme.secondary,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         } else if (transaction.noReceiptNeeded) {
                             Text(
                                 text = "• No Receipt",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.outline
+                                color = MaterialTheme.colorScheme.outline,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
-                        Text(
-                            text = "•",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = dateFormatted,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
                 }
             }
 
-            Text(
-                text = amountFormatted,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = if (isDebit) ColorExpense else ColorIncome
-                ),
-                maxLines = 1,
-                softWrap = false,
-                textAlign = TextAlign.End,
+            Column(
+                horizontalAlignment = Alignment.End,
                 modifier = Modifier.padding(start = 8.dp)
-            )
+            ) {
+                Text(
+                    text = amountFormatted,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = if (isDebit) ColorExpense else ColorIncome
+                    ),
+                    maxLines = 1,
+                    softWrap = false,
+                    textAlign = TextAlign.End
+                )
+                Text(
+                    text = dateFormatted,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false,
+                    textAlign = TextAlign.End
+                )
+            }
         }
     }
 }

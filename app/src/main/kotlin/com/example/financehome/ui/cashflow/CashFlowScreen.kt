@@ -185,11 +185,11 @@ fun CashFlowScreen(
                                 safeToSpendStatus = safeToSpendStatus,
                                 wageEstimate = wageEstimate,
                                 currencyFormat = currencyFormat,
-                                onToggleBillPaid = { viewModel.toggleBillPaid(it) },
+                                onToggleBillPaid = { bill, date -> viewModel.toggleBillPaid(bill, date) },
                                 onToggleDebtPaid = { viewModel.toggleDebtPaid(it) },
                                 onToggleObligationPaid = { item ->
                                     if (item.type == ObligationType.BILL && item.originalBill != null) {
-                                        viewModel.toggleBillPaid(item.originalBill)
+                                        viewModel.toggleBillPaid(item.originalBill, item.dueDate)
                                     } else if (item.type == ObligationType.DEBT && item.originalDebt != null) {
                                         viewModel.toggleDebtPaid(item.originalDebt)
                                     }
@@ -218,7 +218,7 @@ fun CashFlowScreen(
                                 onEditPaycheck = { showEditPaycheckDialog = true },
                                 onToggleObligationPaid = { item ->
                                     if (item.type == ObligationType.BILL && item.originalBill != null) {
-                                        viewModel.toggleBillPaid(item.originalBill)
+                                        viewModel.toggleBillPaid(item.originalBill, item.dueDate)
                                     } else if (item.type == ObligationType.DEBT && item.originalDebt != null) {
                                         viewModel.toggleDebtPaid(item.originalDebt)
                                     }
@@ -819,7 +819,7 @@ fun CashFlowCalendarCard(
     safeToSpendStatus: SafeToSpendStatus,
     wageEstimate: WageEstimate?,
     currencyFormat: NumberFormat,
-    onToggleBillPaid: (Bill) -> Unit,
+    onToggleBillPaid: (Bill, LocalDate) -> Unit,
     onToggleDebtPaid: (Debt) -> Unit,
     onToggleObligationPaid: (UpcomingObligationItem) -> Unit,
     modifier: Modifier = Modifier
@@ -1116,12 +1116,14 @@ fun CashFlowCalendarCard(
                     }
 
                     dayBills.forEach { bill ->
+                        val billDueDate = displayedMonth.atDay(day)
+                        val isPaid = bill.isPaidForDate(billDueDate)
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(MaterialTheme.colorScheme.surface)
-                                .clickable { onToggleBillPaid(bill) }
+                                .clickable { onToggleBillPaid(bill, billDueDate) }
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
@@ -1131,9 +1133,9 @@ fun CashFlowCalendarCard(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Icon(
-                                    imageVector = if (bill.isPaidThisMonth) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                    imageVector = if (isPaid) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
                                     contentDescription = null,
-                                    tint = if (bill.isPaidThisMonth) ColorIncome else MaterialTheme.colorScheme.outline,
+                                    tint = if (isPaid) ColorIncome else MaterialTheme.colorScheme.outline,
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Column {
@@ -1141,7 +1143,7 @@ fun CashFlowCalendarCard(
                                         text = bill.name,
                                         style = MaterialTheme.typography.bodySmall.copy(
                                             fontWeight = FontWeight.SemiBold,
-                                            textDecoration = if (bill.isPaidThisMonth) TextDecoration.LineThrough else TextDecoration.None
+                                            textDecoration = if (isPaid) TextDecoration.LineThrough else TextDecoration.None
                                         )
                                     )
                                     Text(
@@ -1153,7 +1155,11 @@ fun CashFlowCalendarCard(
                             }
                             Text(
                                 text = currencyFormat.format(bill.amount),
-                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    textDecoration = if (isPaid) TextDecoration.LineThrough else TextDecoration.None
+                                ),
+                                color = if (isPaid) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface
                             )
                         }
                     }
@@ -1917,12 +1923,12 @@ fun CashFlowPaycheckPlannerCard(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = currencyFormat.format(breakdown.windowObligationsTotal),
+                            text = currencyFormat.format(breakdown.unpaidWindowObligationsTotal),
                             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.primary
                         )
                         Text(
-                            text = "Bills: ${currencyFormat.format(breakdown.windowBillsTotal)} • Debts: ${currencyFormat.format(breakdown.windowDebtsTotal)}",
+                            text = "Unpaid Bills: ${currencyFormat.format(breakdown.unpaidWindowBillsTotal)} • Debts: ${currencyFormat.format(breakdown.unpaidWindowDebtsTotal)}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
                         )

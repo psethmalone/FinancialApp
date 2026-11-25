@@ -60,54 +60,65 @@ class BillRepository @Inject constructor(
 
     suspend fun deleteBill(bill: Bill) = billDao.deleteBill(bill)
 
-    suspend fun toggleBillPaid(bill: Bill, currentDate: LocalDate = LocalDate.now()) {
-        val thisMonthDue = try {
+    suspend fun toggleBillPaid(bill: Bill, targetDate: LocalDate? = null, currentDate: LocalDate = LocalDate.now()) {
+        val dueToToggle = targetDate ?: bill.getEffectiveNextDueDate(currentDate)
+        val isSettled = bill.isPaidForDate(dueToToggle, currentDate)
+        if (isSettled) {
+            unmarkBillPaid(bill, dueToToggle, currentDate)
+        } else {
+            markBillPaidForCycle(bill, dueToToggle, currentDate)
+        }
+    }
+
+    suspend fun markBillPaidForCycle(
+        bill: Bill,
+        dueToSettle: LocalDate = bill.getEffectiveNextDueDate(),
+        currentDate: LocalDate = LocalDate.now()
+    ) {
+        val nextDue = bill.advanceDueDate(dueToSettle)
+        val timestamp = System.currentTimeMillis()
+        val currentMonthDue = try {
             currentDate.withDayOfMonth(minOf(bill.dueDayOfMonth, currentDate.lengthOfMonth()))
         } catch (_: Exception) {
             currentDate
         }
-        val isSettledForThisCycle = bill.isPaidForDate(thisMonthDue, currentDate)
-
-        if (isSettledForThisCycle) {
-            unmarkBillPaid(bill, currentDate)
-        } else {
-            markBillPaidForCycle(bill, currentDate)
-        }
-    }
-
-    suspend fun markBillPaidForCycle(bill: Bill, currentDate: LocalDate = LocalDate.now()) {
-        val currentDue = bill.getEffectiveNextDueDate(currentDate)
-        val nextDue = bill.advanceDueDate(currentDue)
-        val timestamp = System.currentTimeMillis()
-        val isCurrentMonth = currentDue.year == currentDate.year && currentDue.monthValue == currentDate.monthValue
+        val isPaidThisMonth = (dueToSettle.year == currentDate.year && dueToSettle.monthValue == currentDate.monthValue)
+                || !nextDue.isBefore(currentMonthDue)
         billDao.updateSettlement(
             id = bill.id,
             nextDueDateEpochDay = nextDue.toEpochDay(),
-            lastSettledDateEpochDay = currentDue.toEpochDay(),
-            isPaid = isCurrentMonth,
+            lastSettledDateEpochDay = dueToSettle.toEpochDay(),
+            isPaid = isPaidThisMonth,
             timestamp = timestamp
         )
     }
 
-    suspend fun unmarkBillPaid(bill: Bill, currentDate: LocalDate = LocalDate.now()) {
+    suspend fun unmarkBillPaid(
+        bill: Bill,
+        dueToUnsettle: LocalDate? = null,
+        currentDate: LocalDate = LocalDate.now()
+    ) {
         val currentNext = bill.getEffectiveNextDueDate(currentDate)
-        val restoredDue = bill.lastSettledDateEpochDay?.let { LocalDate.ofEpochDay(it) }
+        val restoredDue = dueToUnsettle
+            ?: bill.lastSettledDateEpochDay?.let { LocalDate.ofEpochDay(it) }
             ?: bill.rollbackDueDate(currentNext)
+        val isThisCurrentMonth = restoredDue.year == currentDate.year && restoredDue.monthValue == currentDate.monthValue
+        val isStillPaidThisMonth = if (isThisCurrentMonth) false else bill.isPaidThisMonth
         billDao.updateSettlement(
             id = bill.id,
             nextDueDateEpochDay = restoredDue.toEpochDay(),
             lastSettledDateEpochDay = null,
-            isPaid = false,
+            isPaid = isStillPaidThisMonth,
             timestamp = null
         )
     }
 
-    suspend fun markBillPaid(billId: String, isPaid: Boolean = true, currentDate: LocalDate = LocalDate.now()) {
+    suspend fun markBillPaid(billId: String, isPaid: Boolean = true, targetDate: LocalDate? = null, currentDate: LocalDate = LocalDate.now()) {
         val bill = billDao.getBillById(billId) ?: return
         if (isPaid) {
-            markBillPaidForCycle(bill, currentDate)
+            markBillPaidForCycle(bill, targetDate ?: bill.getEffectiveNextDueDate(currentDate), currentDate)
         } else {
-            unmarkBillPaid(bill, currentDate)
+            unmarkBillPaid(bill, targetDate, currentDate)
         }
     }
 
