@@ -70,4 +70,12 @@ class DebtRepository @Inject constructor(
         val timestamp = if (newPaid) System.currentTimeMillis() else null
         debtDao.markPaid(debt.id, newPaid, timestamp)
     }
+
+    suspend fun payDebt(debtId: String, amount: Double) {
+        val debt = debtDao.getDebtById(debtId) ?: return
+        val newBalance = maxOf(0.0, debt.currentBalance - amount)
+        val timestamp = System.currentTimeMillis()
+        debtDao.updateDebt(debt.copy(currentBalance = newBalance, isPaidThisMonth = true))
+        debtDao.markPaid(debt.id, true, timestamp)
+    }
 }

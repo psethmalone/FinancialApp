@@ -100,4 +100,14 @@ class TransactionRepository @Inject constructor(
     suspend fun markAllMissingAsNoReceipt() {
         transactionDao.markAllMissingAsNoReceipt()
     }
+
+    suspend fun updateTransactionLinks(
+        id: String,
+        billId: String?,
+        debtId: String?,
+        isDiscretionary: Boolean = false,
+        noReceiptNeeded: Boolean = true
+    ): Int {
+        return transactionDao.updateTransactionLinks(id, billId, debtId, isDiscretionary, noReceiptNeeded)
+    }
 }

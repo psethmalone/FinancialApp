@@ -33,10 +33,13 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import com.example.financehome.data.model.Bill
+import com.example.financehome.data.model.Debt
 import com.example.financehome.data.model.ReceiptItem
 import com.example.financehome.data.model.ReceiptItemCategory
 import com.example.financehome.data.model.Transaction
 import com.example.financehome.data.model.TransactionType
+import com.example.financehome.domain.ObligationType
 import com.example.financehome.ui.dashboard.formatTimestamp
 import com.example.financehome.ui.theme.ColorExpense
 import com.example.financehome.ui.theme.ColorIncome
@@ -69,6 +72,8 @@ fun TransactionsScreen(
     val searchQuery by viewModel.searchQuery.collectAsState()
     val selectedCategory by viewModel.selectedCategory.collectAsState()
     val transactions by viewModel.filteredTransactions.collectAsState()
+    val bills by viewModel.bills.collectAsState()
+    val debts by viewModel.debts.collectAsState()
 
     var selectedTransactionForEdit by remember { mutableStateOf<Transaction?>(null) }
     val currencyFormat = NumberFormat.getCurrencyInstance(Locale.US)
@@ -195,6 +200,8 @@ fun TransactionsScreen(
             receiptItems = receiptItems,
             isScanning = isScanning,
             currencyFormat = currencyFormat,
+            bills = bills,
+            debts = debts,
             onDismiss = { selectedTransactionForEdit = null },
             onUpdateCategory = { newCategory ->
                 viewModel.updateTransactionCategory(transaction, newCategory)
@@ -202,7 +209,7 @@ fun TransactionsScreen(
             },
             onToggleDiscretionary = { isDiscretionary ->
                 viewModel.toggleDiscretionary(transaction, isDiscretionary)
-                selectedTransactionForEdit = null
+                selectedTransactionForEdit = selectedTransactionForEdit?.copy(isDiscretionary = isDiscretionary)
             },
             onDelete = {
                 viewModel.deleteTransaction(transaction)
@@ -219,6 +226,31 @@ fun TransactionsScreen(
                 val newNoReceipt = !transaction.noReceiptNeeded
                 viewModel.markNoReceiptNeeded(transaction.id, newNoReceipt)
                 selectedTransactionForEdit = transaction.copy(noReceiptNeeded = newNoReceipt)
+            },
+            onLinkToBill = { billId ->
+                viewModel.linkTransactionToBill(transaction.id, billId)
+                selectedTransactionForEdit = transaction.copy(
+                    linkedBillId = billId,
+                    linkedDebtId = null,
+                    isDiscretionary = false,
+                    noReceiptNeeded = true
+                )
+            },
+            onLinkToDebt = { debtId, amount ->
+                viewModel.linkTransactionToDebt(transaction.id, debtId, amount)
+                selectedTransactionForEdit = transaction.copy(
+                    linkedDebtId = debtId,
+                    linkedBillId = null,
+                    isDiscretionary = false,
+                    noReceiptNeeded = true
+                )
+            },
+            onUnlinkObligation = {
+                viewModel.unlinkTransactionObligation(transaction.id)
+                selectedTransactionForEdit = transaction.copy(
+                    linkedBillId = null,
+                    linkedDebtId = null
+                )
             }
         )
     }
@@ -305,6 +337,19 @@ fun TransactionRowItem(
                                 color = MaterialTheme.colorScheme.outline
                             )
                         }
+                        if (transaction.linkedBillId != null) {
+                            Text(
+                                text = "• 📄 Bill",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else if (transaction.linkedDebtId != null) {
+                            Text(
+                                text = "• 💳 Debt",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
                         if (transaction.isDiscretionary && isDebit) {
                             Text(
                                 text = "• Discretionary",
@@ -347,6 +392,8 @@ fun TransactionDetailSheet(
     onDelete: () -> Unit,
     receiptItems: List<ReceiptItem> = emptyList(),
     isScanning: Boolean = false,
+    bills: List<Bill> = emptyList(),
+    debts: List<Debt> = emptyList(),
     onCreateCaptureUri: (() -> Pair<File, Uri>)? = null,
     onSavePickedUri: (suspend (Uri) -> String)? = null,
     onAttachReceipt: ((String) -> Unit)? = null,
@@ -354,10 +401,14 @@ fun TransactionDetailSheet(
     onUpdateItem: ((ReceiptItem) -> Unit)? = null,
     onDeleteItem: ((ReceiptItem) -> Unit)? = null,
     onRemoveReceipt: (() -> Unit)? = null,
-    onToggleNoReceipt: (() -> Unit)? = null
+    onToggleNoReceipt: (() -> Unit)? = null,
+    onLinkToBill: ((String) -> Unit)? = null,
+    onLinkToDebt: ((String, Double) -> Unit)? = null,
+    onUnlinkObligation: (() -> Unit)? = null
 ) {
     var showZoomImage by remember { mutableStateOf(false) }
     var showAddItemDialog by remember { mutableStateOf(false) }
+    var showLinkDialog by remember { mutableStateOf(false) }
     var editingItem by remember { mutableStateOf<ReceiptItem?>(null) }
     var tempCameraFileUri by remember { mutableStateOf<String?>(null) }
     val coroutineScope = rememberCoroutineScope()
@@ -485,6 +536,94 @@ fun TransactionDetailSheet(
                         onClick = { onUpdateCategory(cat) },
                         label = { Text(cat) }
                     )
+                }
+            }
+
+            HorizontalDivider()
+
+            // Obligation Link Section
+            Text(
+                text = "Bill / Debt Obligation Link",
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
+            )
+
+            if (transaction.linkedBillId != null) {
+                val linkedBill = bills.find { it.id == transaction.linkedBillId }
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Linked to Bill",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = linkedBill?.name ?: "Bill (${transaction.linkedBillId})",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                            )
+                        }
+                        if (onUnlinkObligation != null) {
+                            TextButton(onClick = onUnlinkObligation) {
+                                Text("Unlink", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    }
+                }
+            } else if (transaction.linkedDebtId != null) {
+                val linkedDebt = debts.find { it.id == transaction.linkedDebtId }
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Linked to Debt",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                            Text(
+                                text = linkedDebt?.name ?: "Debt (${transaction.linkedDebtId})",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                            )
+                        }
+                        if (onUnlinkObligation != null) {
+                            TextButton(onClick = onUnlinkObligation) {
+                                Text("Unlink", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    }
+                }
+            } else {
+                OutlinedButton(
+                    onClick = { showLinkDialog = true },
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Tag to Bill or Debt", style = MaterialTheme.typography.labelLarge)
                 }
             }
 
@@ -906,6 +1045,151 @@ fun TransactionDetailSheet(
             onDelete = {
                 onDeleteItem?.invoke(item)
                 editingItem = null
+            }
+        )
+    }
+
+    // Link Obligation Dialog
+    if (showLinkDialog) {
+        var selectedType by remember { mutableStateOf(ObligationType.BILL) }
+        AlertDialog(
+            onDismissRequest = { showLinkDialog = false },
+            title = {
+                Text("Tag to Bill or Debt", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "Link this transaction to an existing Bill or Debt to mark it paid and update balances automatically.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = selectedType == ObligationType.BILL,
+                            onClick = { selectedType = ObligationType.BILL },
+                            label = { Text("Bill", maxLines = 1, softWrap = false) },
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = selectedType == ObligationType.DEBT,
+                            onClick = { selectedType = ObligationType.DEBT },
+                            label = { Text("Debt", maxLines = 1, softWrap = false) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    if (selectedType == ObligationType.BILL) {
+                        if (bills.isEmpty()) {
+                            Text(
+                                "No bills found.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 240.dp)
+                                    .verticalScroll(rememberScrollState())
+                            ) {
+                                bills.forEach { bill ->
+                                    Surface(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                onLinkToBill?.invoke(bill.id)
+                                                showLinkDialog = false
+                                            },
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(10.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                bill.name,
+                                                fontWeight = FontWeight.Medium,
+                                                modifier = Modifier.weight(1f),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                currencyFormat.format(bill.amount),
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                softWrap = false
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        if (debts.isEmpty()) {
+                            Text(
+                                "No debts found.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 240.dp)
+                                    .verticalScroll(rememberScrollState())
+                            ) {
+                                debts.forEach { debt ->
+                                    Surface(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                onLinkToDebt?.invoke(debt.id, transaction.amount)
+                                                showLinkDialog = false
+                                            },
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(10.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                debt.name,
+                                                fontWeight = FontWeight.Medium,
+                                                modifier = Modifier.weight(1f),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                currencyFormat.format(debt.currentBalance),
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                softWrap = false
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showLinkDialog = false }) {
+                    Text("Cancel")
+                }
             }
         )
     }

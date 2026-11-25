@@ -118,9 +118,11 @@ fun AppNavigation(
             )
         }
         showAddTransactionScreen -> {
+            val bills by transactionsViewModel.bills.collectAsState()
+            val debts by transactionsViewModel.debts.collectAsState()
             AddTransactionScreen(
                 onDismiss = { showAddTransactionScreen = false },
-                onSaveTransaction = { amount, merchant, category, type, notes, isDiscretionary, receiptUri, receiptItems ->
+                onSaveTransaction = { amount, merchant, category, type, notes, isDiscretionary, receiptUri, receiptItems, noReceiptNeeded, linkedBillId, linkedDebtId ->
                     transactionsViewModel.addTransactionWithReceipt(
                         amount = amount,
                         merchant = merchant,
@@ -129,9 +131,14 @@ fun AppNavigation(
                         notes = notes,
                         isDiscretionary = isDiscretionary,
                         receiptImageUri = receiptUri,
-                        receiptItems = receiptItems
+                        receiptItems = receiptItems,
+                        noReceiptNeeded = noReceiptNeeded,
+                        linkedBillId = linkedBillId,
+                        linkedDebtId = linkedDebtId
                     )
                 },
+                bills = bills,
+                debts = debts,
                 onCreateCaptureUri = { transactionsViewModel.createReceiptCaptureFile() },
                 onSavePickedUri = { uri -> transactionsViewModel.savePickedImageToInternalStorage(uri) },
                 onScanReceipt = { uriStr -> transactionsViewModel.scanReceiptOnly(uriStr) }
@@ -210,12 +217,16 @@ fun AppNavigation(
         val currentTx = deepLinkedTransaction!!
         val receiptItems by transactionsViewModel.getReceiptItems(currentTx.id).collectAsState(initial = emptyList<ReceiptItem>())
         val isScanning by transactionsViewModel.isScanningReceipt.collectAsState()
+        val bills by transactionsViewModel.bills.collectAsState()
+        val debts by transactionsViewModel.debts.collectAsState()
 
         TransactionDetailSheet(
             transaction = currentTx,
             receiptItems = receiptItems,
             isScanning = isScanning,
             currencyFormat = NumberFormat.getCurrencyInstance(Locale.US),
+            bills = bills,
+            debts = debts,
             onDismiss = { deepLinkedTransaction = null },
             onUpdateCategory = { newCategory ->
                 transactionsViewModel.updateTransactionCategory(currentTx, newCategory)
@@ -240,6 +251,31 @@ fun AppNavigation(
                 val newNoReceipt = !currentTx.noReceiptNeeded
                 transactionsViewModel.markNoReceiptNeeded(currentTx.id, newNoReceipt)
                 deepLinkedTransaction = currentTx.copy(noReceiptNeeded = newNoReceipt)
+            },
+            onLinkToBill = { billId ->
+                transactionsViewModel.linkTransactionToBill(currentTx.id, billId)
+                deepLinkedTransaction = currentTx.copy(
+                    linkedBillId = billId,
+                    linkedDebtId = null,
+                    isDiscretionary = false,
+                    noReceiptNeeded = true
+                )
+            },
+            onLinkToDebt = { debtId, amount ->
+                transactionsViewModel.linkTransactionToDebt(currentTx.id, debtId, amount)
+                deepLinkedTransaction = currentTx.copy(
+                    linkedDebtId = debtId,
+                    linkedBillId = null,
+                    isDiscretionary = false,
+                    noReceiptNeeded = true
+                )
+            },
+            onUnlinkObligation = {
+                transactionsViewModel.unlinkTransactionObligation(currentTx.id)
+                deepLinkedTransaction = currentTx.copy(
+                    linkedBillId = null,
+                    linkedDebtId = null
+                )
             }
         )
     }

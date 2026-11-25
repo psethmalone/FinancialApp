@@ -66,6 +66,11 @@ class BillRepository @Inject constructor(
         billDao.markPaid(bill.id, newPaid, timestamp)
     }
 
+    suspend fun markBillPaid(billId: String, isPaid: Boolean = true) {
+        val timestamp = if (isPaid) System.currentTimeMillis() else null
+        billDao.markPaid(billId, isPaid, timestamp)
+    }
+
     fun updatePaycheckConfig(config: PaycheckConfig) {
         prefs.edit()
             .putString(KEY_FREQUENCY, config.frequency.name)

@@ -18,7 +18,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.financehome.data.model.Bill
@@ -367,7 +369,10 @@ fun BillCardItem(
                             fontWeight = FontWeight.Bold,
                             textDecoration = if (bill.isPaidThisMonth) TextDecoration.LineThrough else TextDecoration.None
                         ),
-                        color = if (bill.isPaidThisMonth) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface
+                        color = if (bill.isPaidThisMonth) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
                     if (bill.isAutoPay) {
                         Surface(
@@ -402,21 +407,27 @@ fun BillCardItem(
                     Text(
                         text = bill.category,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
 
             Column(
                 horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.padding(start = 8.dp)
             ) {
                 Text(
                     text = currencyFormat.format(bill.amount),
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.Bold,
                         color = if (bill.isPaidThisMonth) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface
-                    )
+                    ),
+                    maxLines = 1,
+                    softWrap = false,
+                    textAlign = TextAlign.End
                 )
                 IconButton(
                     onClick = onDelete,
@@ -482,7 +493,9 @@ fun DebtCardItem(
                         Text(
                             text = debt.name,
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            maxLines = 1
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
                         Surface(
                             shape = RoundedCornerShape(4.dp),
@@ -556,7 +569,9 @@ fun DebtCardItem(
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontWeight = FontWeight.Bold,
                             color = aprColor
-                        )
+                        ),
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
 
@@ -568,7 +583,9 @@ fun DebtCardItem(
                     )
                     Text(
                         text = currencyFormat.format(debt.minimumPayment) + "/mo",
-                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
             }
@@ -753,28 +770,26 @@ fun AddBillDialog(
                 }
 
                 Text(text = "Category", style = MaterialTheme.typography.labelMedium)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    categories.take(3).forEach { cat ->
-                        FilterChip(
-                            selected = selectedCategory == cat,
-                            onClick = { selectedCategory = cat },
-                            label = { Text(cat, style = MaterialTheme.typography.labelSmall) }
-                        )
-                    }
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    categories.drop(3).forEach { cat ->
-                        FilterChip(
-                            selected = selectedCategory == cat,
-                            onClick = { selectedCategory = cat },
-                            label = { Text(cat, style = MaterialTheme.typography.labelSmall) }
-                        )
+                categories.chunked(2).forEach { rowCats ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        rowCats.forEach { cat ->
+                            FilterChip(
+                                selected = selectedCategory == cat,
+                                onClick = { selectedCategory = cat },
+                                label = {
+                                    Text(
+                                        text = cat,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
 
@@ -880,17 +895,30 @@ fun AddDebtDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                Text(text = "Type", style = MaterialTheme.typography.labelMedium)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    DebtType.values().forEach { type ->
-                        FilterChip(
-                            selected = selectedType == type,
-                            onClick = { selectedType = type },
-                            label = { Text(type.name.take(6), style = MaterialTheme.typography.labelSmall) }
-                        )
+                Text(text = "Debt Type", style = MaterialTheme.typography.labelMedium)
+                listOf(
+                    listOf(DebtType.CREDIT_CARD to "Credit Card", DebtType.LOAN to "Loan"),
+                    listOf(DebtType.MORTGAGE to "Mortgage", DebtType.OTHER to "Other")
+                ).forEach { rowTypes ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        rowTypes.forEach { (type, label) ->
+                            FilterChip(
+                                selected = selectedType == type,
+                                onClick = { selectedType = type },
+                                label = {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
             }
@@ -1337,16 +1365,29 @@ fun EditDebtDialog(
                 )
 
                 Text(text = "Debt Type", style = MaterialTheme.typography.labelMedium)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    DebtType.values().forEach { type ->
-                        FilterChip(
-                            selected = selectedType == type,
-                            onClick = { selectedType = type },
-                            label = { Text(type.name.take(6), style = MaterialTheme.typography.labelSmall) }
-                        )
+                listOf(
+                    listOf(DebtType.CREDIT_CARD to "Credit Card", DebtType.LOAN to "Loan"),
+                    listOf(DebtType.MORTGAGE to "Mortgage", DebtType.OTHER to "Other")
+                ).forEach { rowTypes ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        rowTypes.forEach { (type, label) ->
+                            FilterChip(
+                                selected = selectedType == type,
+                                onClick = { selectedType = type },
+                                label = {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
             }
@@ -1455,7 +1496,14 @@ fun PayDebtDialog(
                             onClick = {
                                 paymentAmountText = String.format(Locale.US, "%.2f", debt.minimumPayment)
                             },
-                            label = { Text("Minimum (${currencyFormat.format(debt.minimumPayment)})", style = MaterialTheme.typography.labelSmall) },
+                            label = {
+                                Text(
+                                    text = "Minimum (${currencyFormat.format(debt.minimumPayment)})",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            },
                             modifier = Modifier.weight(1f)
                         )
                         FilterChip(
@@ -1463,7 +1511,15 @@ fun PayDebtDialog(
                             onClick = {
                                 paymentAmountText = String.format(Locale.US, "%.2f", debt.minimumPayment + 25.0)
                             },
-                            label = { Text("+$25 Extra", style = MaterialTheme.typography.labelSmall) }
+                            label = {
+                                Text(
+                                    text = "+$25 Extra",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            },
+                            modifier = Modifier.weight(1f)
                         )
                     }
 
@@ -1476,21 +1532,51 @@ fun PayDebtDialog(
                             onClick = {
                                 paymentAmountText = String.format(Locale.US, "%.2f", debt.minimumPayment + 50.0)
                             },
-                            label = { Text("+$50 Extra", style = MaterialTheme.typography.labelSmall) }
+                            label = {
+                                Text(
+                                    text = "+$50 Extra",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            },
+                            modifier = Modifier.weight(1f)
                         )
                         FilterChip(
                             selected = paymentAmount == debt.minimumPayment + 100.0,
                             onClick = {
                                 paymentAmountText = String.format(Locale.US, "%.2f", debt.minimumPayment + 100.0)
                             },
-                            label = { Text("+$100 Extra", style = MaterialTheme.typography.labelSmall) }
+                            label = {
+                                Text(
+                                    text = "+$100 Extra",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            },
+                            modifier = Modifier.weight(1f)
                         )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         FilterChip(
                             selected = paymentAmount == debt.currentBalance,
                             onClick = {
                                 paymentAmountText = String.format(Locale.US, "%.2f", debt.currentBalance)
                             },
-                            label = { Text("Full Balance", style = MaterialTheme.typography.labelSmall) }
+                            label = {
+                                Text(
+                                    text = "Full Balance (${currencyFormat.format(debt.currentBalance)})",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth()
                         )
                     }
                 }

@@ -831,12 +831,16 @@ fun DashboardScreen(
         val currentTx = selectedTransactionForDetail!!
         val receiptItems by viewModel.getReceiptItems(currentTx.id).collectAsState(initial = emptyList<ReceiptItem>())
         val isScanning by viewModel.isScanningReceipt.collectAsState()
+        val bills by viewModel.bills.collectAsState()
+        val debts by viewModel.debts.collectAsState()
 
         TransactionDetailSheet(
             transaction = currentTx,
             receiptItems = receiptItems,
             isScanning = isScanning,
             currencyFormat = currencyFormat,
+            bills = bills,
+            debts = debts,
             onDismiss = { selectedTransactionForDetail = null },
             onUpdateCategory = { newCategory ->
                 viewModel.updateTransactionCategory(currentTx, newCategory)
@@ -861,6 +865,31 @@ fun DashboardScreen(
                 val newNoReceipt = !currentTx.noReceiptNeeded
                 viewModel.markNoReceiptNeeded(currentTx.id, newNoReceipt)
                 selectedTransactionForDetail = currentTx.copy(noReceiptNeeded = newNoReceipt)
+            },
+            onLinkToBill = { billId ->
+                viewModel.linkTransactionToBill(currentTx.id, billId)
+                selectedTransactionForDetail = currentTx.copy(
+                    linkedBillId = billId,
+                    linkedDebtId = null,
+                    isDiscretionary = false,
+                    noReceiptNeeded = true
+                )
+            },
+            onLinkToDebt = { debtId, amount ->
+                viewModel.linkTransactionToDebt(currentTx.id, debtId, amount)
+                selectedTransactionForDetail = currentTx.copy(
+                    linkedDebtId = debtId,
+                    linkedBillId = null,
+                    isDiscretionary = false,
+                    noReceiptNeeded = true
+                )
+            },
+            onUnlinkObligation = {
+                viewModel.unlinkTransactionObligation(currentTx.id)
+                selectedTransactionForDetail = currentTx.copy(
+                    linkedBillId = null,
+                    linkedDebtId = null
+                )
             }
         )
     }

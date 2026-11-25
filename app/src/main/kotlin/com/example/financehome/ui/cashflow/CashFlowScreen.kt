@@ -129,6 +129,7 @@ fun CashFlowScreen(
                 CashFlowPaycheckPlannerCard(
                     breakdown = paycheckBreakdown,
                     config = paycheckConfig,
+                    safeToSpendStatus = safeToSpendStatus,
                     currencyFormat = currencyFormat,
                     onEditPaycheck = { showEditPaycheckDialog = true },
                     onToggleObligationPaid = { item ->
@@ -1019,6 +1020,7 @@ fun CashFlowCalendarCard(
 fun CashFlowPaycheckPlannerCard(
     breakdown: PaycheckBreakdown,
     config: PaycheckConfig,
+    safeToSpendStatus: SafeToSpendStatus,
     currencyFormat: NumberFormat,
     onEditPaycheck: () -> Unit,
     onToggleObligationPaid: (UpcomingObligationItem) -> Unit,
@@ -1216,31 +1218,40 @@ fun CashFlowPaycheckPlannerCard(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
+                                val displaySafe = if (period.isCurrentPeriod) safeToSpendStatus.remainingSafeToSpend else period.safeToSpend
+                                val safeColor = when {
+                                    displaySafe > 0.001 -> ColorIncome
+                                    displaySafe >= -0.001 -> MaterialTheme.colorScheme.primary
+                                    else -> ColorExpense
+                                }
                                 Text(
                                     text = "Pay: ${currencyFormat.format(period.projectedTakeHomePay)}",
                                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                                 Text(
                                     text = if (period.isCurrentPeriod) "(Current Hours)" else "(Baseline 40h)",
                                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                                    color = MaterialTheme.colorScheme.outline
+                                    color = MaterialTheme.colorScheme.outline,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = "${currencyFormat.format(period.totalObligations)} due",
                                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                    color = ColorExpense
+                                    color = ColorExpense,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
-                                val safeColor = when {
-                                    period.safeToSpend > 0.001 -> ColorIncome
-                                    period.safeToSpend >= -0.001 -> MaterialTheme.colorScheme.primary
-                                    else -> ColorExpense
-                                }
                                 Text(
-                                    text = "${currencyFormat.format(period.safeToSpend)} safe",
+                                    text = "${currencyFormat.format(displaySafe)} safe",
                                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = safeColor
+                                    color = safeColor,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                                 if (!period.deficitNote.isNullOrBlank()) {
                                     Spacer(modifier = Modifier.height(2.dp))
@@ -1250,7 +1261,9 @@ fun CashFlowPaycheckPlannerCard(
                                             fontSize = 9.sp,
                                             fontWeight = FontWeight.SemiBold
                                         ),
-                                        color = if (period.reserveHeldForFutureChecks > 0.001) ColorWarning else if (period.safeToSpend >= -0.001) ColorIncome else ColorExpense
+                                        color = if (period.reserveHeldForFutureChecks > 0.001) ColorWarning else if (displaySafe >= -0.001) ColorIncome else ColorExpense,
+                                        maxLines = 2,
+                                        softWrap = true
                                     )
                                 }
                             }

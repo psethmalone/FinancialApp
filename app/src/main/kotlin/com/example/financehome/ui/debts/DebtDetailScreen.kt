@@ -12,6 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.financehome.data.model.Debt
 import com.example.financehome.domain.AmortizationRow
@@ -95,33 +96,47 @@ fun DebtDetailScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("Current Balance", style = MaterialTheme.typography.bodyMedium)
+                            Text("Current Balance", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                             Text(
                                 text = currencyFormat.format(debt.currentBalance),
                                 style = MaterialTheme.typography.headlineSmall.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = ColorExpense
-                                )
+                                ),
+                                maxLines = 1,
+                                softWrap = false,
+                                textAlign = TextAlign.End,
+                                modifier = Modifier.padding(start = 8.dp)
                             )
                         }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("Annual APR", style = MaterialTheme.typography.bodyMedium)
+                            Text("Annual APR", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                             Text(
                                 text = String.format(Locale.US, "%.2f%%", debt.apr * 100.0),
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                maxLines = 1,
+                                softWrap = false,
+                                textAlign = TextAlign.End,
+                                modifier = Modifier.padding(start = 8.dp)
                             )
                         }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("Minimum Monthly Payment", style = MaterialTheme.typography.bodyMedium)
+                            Text("Minimum Monthly Payment", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                             Text(
                                 text = currencyFormat.format(debt.minimumPayment),
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                maxLines = 1,
+                                softWrap = false,
+                                textAlign = TextAlign.End,
+                                modifier = Modifier.padding(start = 8.dp)
                             )
                         }
 

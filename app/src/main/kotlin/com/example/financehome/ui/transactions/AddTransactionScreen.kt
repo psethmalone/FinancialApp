@@ -30,9 +30,12 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import com.example.financehome.data.model.Bill
+import com.example.financehome.data.model.Debt
 import com.example.financehome.data.model.ReceiptItem
 import com.example.financehome.data.model.ReceiptItemCategory
 import com.example.financehome.data.model.TransactionType
+import com.example.financehome.domain.ObligationType
 import com.example.financehome.service.ParsedReceipt
 import kotlinx.coroutines.launch
 import java.io.File
@@ -52,8 +55,13 @@ fun AddTransactionScreen(
         notes: String?,
         isDiscretionary: Boolean,
         receiptImageUri: String?,
-        receiptItems: List<ReceiptItem>
+        receiptItems: List<ReceiptItem>,
+        noReceiptNeeded: Boolean,
+        linkedBillId: String?,
+        linkedDebtId: String?
     ) -> Unit,
+    bills: List<Bill> = emptyList(),
+    debts: List<Debt> = emptyList(),
     onCreateCaptureUri: (() -> Pair<File, Uri>)? = null,
     onSavePickedUri: (suspend (Uri) -> String)? = null,
     onScanReceipt: (suspend (String) -> ParsedReceipt)? = null,
@@ -65,6 +73,12 @@ fun AddTransactionScreen(
     var selectedCategory by remember { mutableStateOf(PREDEFINED_CATEGORIES.first()) }
     var notesText by remember { mutableStateOf("") }
     var isDiscretionary by remember { mutableStateOf(true) }
+    var noReceiptNeeded by remember { mutableStateOf(false) }
+
+    // Linked Obligation State
+    var selectedLinkedType by remember { mutableStateOf<ObligationType?>(null) }
+    var selectedLinkedBill by remember { mutableStateOf<Bill?>(null) }
+    var selectedLinkedDebt by remember { mutableStateOf<Debt?>(null) }
 
     // Receipt capture states
     var pendingReceiptUri by remember { mutableStateOf<String?>(null) }
@@ -181,7 +195,10 @@ fun AddTransactionScreen(
                                 notesText,
                                 isDiscretionary,
                                 pendingReceiptUri,
-                                pendingReceiptItems
+                                pendingReceiptItems,
+                                noReceiptNeeded,
+                                selectedLinkedBill?.id,
+                                selectedLinkedDebt?.id
                             )
                             onDismiss()
                         },
@@ -401,6 +418,195 @@ fun AddTransactionScreen(
                             }
                         }
                     }
+
+                    // No Receipt Needed Switch
+                    Card(
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "No Receipt Needed",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                                )
+                                Text(
+                                    text = "Mark as not requiring a receipt (won't appear in Missing Receipts).",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Switch(
+                                checked = noReceiptNeeded,
+                                onCheckedChange = { noReceiptNeeded = it }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Tag to Bill or Debt (Optional) Card
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("🏷️", fontSize = 18.sp)
+                        Column {
+                            Text(
+                                text = "Tag to Bill or Debt (Optional)",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                            )
+                            Text(
+                                text = "Auto-updates bill/debt balance and marks as paid.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    // Obligation type selector: None, Bill, Debt
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = selectedLinkedType == null,
+                            onClick = {
+                                selectedLinkedType = null
+                                selectedLinkedBill = null
+                                selectedLinkedDebt = null
+                            },
+                            label = { Text("None", maxLines = 1, softWrap = false) },
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = selectedLinkedType == ObligationType.BILL,
+                            onClick = {
+                                selectedLinkedType = ObligationType.BILL
+                                selectedLinkedDebt = null
+                            },
+                            label = { Text("Bill", maxLines = 1, softWrap = false) },
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = selectedLinkedType == ObligationType.DEBT,
+                            onClick = {
+                                selectedLinkedType = ObligationType.DEBT
+                                selectedLinkedBill = null
+                            },
+                            label = { Text("Debt", maxLines = 1, softWrap = false) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    if (selectedLinkedType == ObligationType.BILL) {
+                        if (bills.isEmpty()) {
+                            Text(
+                                "No bills registered.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            Text(
+                                "Select Bill:",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
+                            )
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                items(bills) { bill ->
+                                    val isSelected = selectedLinkedBill?.id == bill.id
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = {
+                                            if (isSelected) {
+                                                selectedLinkedBill = null
+                                            } else {
+                                                selectedLinkedBill = bill
+                                                if (merchantText.isBlank()) merchantText = bill.name
+                                                if (amountText.isBlank()) amountText = String.format(Locale.US, "%.2f", bill.amount)
+                                                selectedCategory = bill.category
+                                                isDiscretionary = false
+                                                noReceiptNeeded = true
+                                            }
+                                        },
+                                        label = {
+                                            Text(
+                                                "${bill.name} (${currencyFormat.format(bill.amount)})",
+                                                maxLines = 1,
+                                                softWrap = false
+                                            )
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    } else if (selectedLinkedType == ObligationType.DEBT) {
+                        if (debts.isEmpty()) {
+                            Text(
+                                "No debts registered.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            Text(
+                                "Select Debt:",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
+                            )
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                items(debts) { debt ->
+                                    val isSelected = selectedLinkedDebt?.id == debt.id
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = {
+                                            if (isSelected) {
+                                                selectedLinkedDebt = null
+                                            } else {
+                                                selectedLinkedDebt = debt
+                                                if (merchantText.isBlank()) merchantText = debt.name
+                                                if (amountText.isBlank()) amountText = String.format(Locale.US, "%.2f", debt.minimumPayment)
+                                                selectedCategory = "Debt Payment"
+                                                isDiscretionary = false
+                                                noReceiptNeeded = true
+                                            }
+                                        },
+                                        label = {
+                                            Text(
+                                                "${debt.name} (Min: ${currencyFormat.format(debt.minimumPayment)})",
+                                                maxLines = 1,
+                                                softWrap = false
+                                            )
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -508,7 +714,10 @@ fun AddTransactionScreen(
                         notesText,
                         isDiscretionary,
                         pendingReceiptUri,
-                        pendingReceiptItems
+                        pendingReceiptItems,
+                        noReceiptNeeded,
+                        selectedLinkedBill?.id,
+                        selectedLinkedDebt?.id
                     )
                     onDismiss()
                 },

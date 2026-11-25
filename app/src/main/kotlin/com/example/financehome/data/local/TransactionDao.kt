@@ -135,4 +135,7 @@ interface TransactionDao {
 
     @Query("UPDATE transactions SET category = :category, isDiscretionary = :isDiscretionary, notes = :notes WHERE LOWER(merchant) = LOWER(:merchant)")
     suspend fun updateCategoryForMerchant(merchant: String, category: String, isDiscretionary: Boolean, notes: String?): Int
+
+    @Query("UPDATE transactions SET linkedBillId = :billId, linkedDebtId = :debtId, isDiscretionary = :isDiscretionary, noReceiptNeeded = :noReceiptNeeded WHERE id = :id")
+    suspend fun updateTransactionLinks(id: String, billId: String?, debtId: String?, isDiscretionary: Boolean, noReceiptNeeded: Boolean): Int
 }

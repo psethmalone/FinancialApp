@@ -58,6 +58,22 @@ class DashboardViewModel @Inject constructor(
 
     val spendingAlertConfig = spendingAlertRepo.config
 
+    val bills: StateFlow<List<Bill>> =
+        billRepo.getAllBills()
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = emptyList()
+            )
+
+    val debts: StateFlow<List<Debt>> =
+        debtRepo.getAllDebts()
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = emptyList()
+            )
+
     val safeToSpendStatus: StateFlow<SafeToSpendStatus> =
         combine(
             billRepo.paycheckConfig,
@@ -368,5 +384,43 @@ class DashboardViewModel @Inject constructor(
 
     fun removeReceipt(transactionId: String) {
         viewModelScope.launch { receiptRepo.removeReceipt(transactionId) }
+    }
+
+    fun linkTransactionToBill(transactionId: String, billId: String) {
+        viewModelScope.launch {
+            transactionRepo.updateTransactionLinks(
+                id = transactionId,
+                billId = billId,
+                debtId = null,
+                isDiscretionary = false,
+                noReceiptNeeded = true
+            )
+            billRepo.markBillPaid(billId, true)
+        }
+    }
+
+    fun linkTransactionToDebt(transactionId: String, debtId: String, amount: Double) {
+        viewModelScope.launch {
+            transactionRepo.updateTransactionLinks(
+                id = transactionId,
+                billId = null,
+                debtId = debtId,
+                isDiscretionary = false,
+                noReceiptNeeded = true
+            )
+            debtRepo.payDebt(debtId, amount)
+        }
+    }
+
+    fun unlinkTransactionObligation(transactionId: String) {
+        viewModelScope.launch {
+            transactionRepo.updateTransactionLinks(
+                id = transactionId,
+                billId = null,
+                debtId = null,
+                isDiscretionary = true,
+                noReceiptNeeded = false
+            )
+        }
     }
 }

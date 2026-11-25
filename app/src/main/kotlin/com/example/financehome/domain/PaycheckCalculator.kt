@@ -41,20 +41,7 @@ object PaycheckCalculator {
 
         // Baseline safe to spend (standard recurring cushion)
         val baselineSafeToSpend = baselineTakeHomePay - perPaycheckReserve
-        // Current pay period safe to spend (incorporates current hours/overtime/verified pay)
-        val currentSafeToSpend = currentTakeHomePay - perPaycheckReserve
         val effectiveIsCurrentPeriodOvertime = isCurrentPeriodOvertime || (currentTakeHomePay > baselineTakeHomePay + 0.01)
-
-        val safeToSpend = currentSafeToSpend
-        val isSurplus = safeToSpend >= 0.0
-        val deficitAmount = if (!isSurplus) -safeToSpend else 0.0
-
-        val daysInPeriod = config.frequency.daysInPeriod
-        val dailySafeToSpend = if (daysInPeriod > 0) {
-            maxOf(0.0, safeToSpend / daysInPeriod)
-        } else {
-            0.0
-        }
 
         // Anchor payday & upcoming pay dates
         val anchorPayDate = LocalDate.ofEpochDay(config.anchorPayDateEpochDay)
@@ -90,6 +77,19 @@ object PaycheckCalculator {
             baselineTakeHomePay = baselineTakeHomePay,
             periodCount = 3
         )
+
+        // Current pay period safe to spend (incorporates current hours/overtime/verified pay)
+        val currentSafeToSpend = currentTakeHomePay - perPaycheckReserve
+        val safeToSpend = currentSafeToSpend
+        val isSurplus = safeToSpend >= 0.0
+        val deficitAmount = if (!isSurplus) -safeToSpend else 0.0
+
+        val daysInPeriod = config.frequency.daysInPeriod
+        val dailySafeToSpend = if (daysInPeriod > 0) {
+            maxOf(0.0, safeToSpend / daysInPeriod)
+        } else {
+            0.0
+        }
 
         // 3-Paycheck Bonus Months (for bi-weekly schedules)
         val threePayMonths = if (config.frequency == PayFrequency.BI_WEEKLY) {

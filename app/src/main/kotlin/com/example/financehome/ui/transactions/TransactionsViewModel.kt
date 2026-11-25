@@ -17,6 +17,10 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 import android.net.Uri
 import com.example.financehome.data.model.ReceiptItem
+import com.example.financehome.data.model.Bill
+import com.example.financehome.data.model.Debt
+import com.example.financehome.data.repository.BillRepository
+import com.example.financehome.data.repository.DebtRepository
 import com.example.financehome.data.repository.ReceiptRepository
 import com.example.financehome.service.ParsedReceipt
 import java.io.File
@@ -25,12 +29,30 @@ import javax.inject.Inject
 @HiltViewModel
 class TransactionsViewModel @Inject constructor(
     private val transactionRepo: TransactionRepository,
-    private val receiptRepo: ReceiptRepository
+    private val receiptRepo: ReceiptRepository,
+    private val billRepo: BillRepository,
+    private val debtRepo: DebtRepository
 ) : ViewModel() {
 
     val isScanningReceipt = MutableStateFlow(false)
     val searchQuery = MutableStateFlow("")
     val selectedCategory = MutableStateFlow<String?>(null)
+
+    val bills: StateFlow<List<Bill>> =
+        billRepo.getAllBills()
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = emptyList()
+            )
+
+    val debts: StateFlow<List<Debt>> =
+        debtRepo.getAllDebts()
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = emptyList()
+            )
 
     val transactions: StateFlow<List<Transaction>> =
         transactionRepo.getAllTransactions()
@@ -167,7 +189,10 @@ class TransactionsViewModel @Inject constructor(
         notes: String?,
         isDiscretionary: Boolean,
         receiptImageUri: String?,
-        receiptItems: List<ReceiptItem>
+        receiptItems: List<ReceiptItem>,
+        noReceiptNeeded: Boolean = false,
+        linkedBillId: String? = null,
+        linkedDebtId: String? = null
     ) {
         viewModelScope.launch {
             val transactionId = UUID.randomUUID().toString()
@@ -184,7 +209,10 @@ class TransactionsViewModel @Inject constructor(
                 isDiscretionary = isDiscretionary,
                 isSynced = false,
                 receiptImageUri = receiptImageUri,
-                hasItemizedReceipt = receiptItems.isNotEmpty()
+                hasItemizedReceipt = receiptItems.isNotEmpty(),
+                noReceiptNeeded = noReceiptNeeded,
+                linkedBillId = linkedBillId,
+                linkedDebtId = linkedDebtId
             )
             transactionRepo.insertTransaction(transaction)
 
@@ -197,6 +225,51 @@ class TransactionsViewModel @Inject constructor(
                 }
                 receiptRepo.insertReceiptItems(itemsWithId)
             }
+
+            // Auto-update linked bill or debt
+            if (linkedBillId != null) {
+                billRepo.markBillPaid(linkedBillId, true)
+            } else if (linkedDebtId != null) {
+                debtRepo.payDebt(linkedDebtId, amount)
+            }
+        }
+    }
+
+    fun linkTransactionToBill(transactionId: String, billId: String) {
+        viewModelScope.launch {
+            transactionRepo.updateTransactionLinks(
+                id = transactionId,
+                billId = billId,
+                debtId = null,
+                isDiscretionary = false,
+                noReceiptNeeded = true
+            )
+            billRepo.markBillPaid(billId, true)
+        }
+    }
+
+    fun linkTransactionToDebt(transactionId: String, debtId: String, amount: Double) {
+        viewModelScope.launch {
+            transactionRepo.updateTransactionLinks(
+                id = transactionId,
+                billId = null,
+                debtId = debtId,
+                isDiscretionary = false,
+                noReceiptNeeded = true
+            )
+            debtRepo.payDebt(debtId, amount)
+        }
+    }
+
+    fun unlinkTransactionObligation(transactionId: String) {
+        viewModelScope.launch {
+            transactionRepo.updateTransactionLinks(
+                id = transactionId,
+                billId = null,
+                debtId = null,
+                isDiscretionary = true,
+                noReceiptNeeded = false
+            )
         }
     }
 }

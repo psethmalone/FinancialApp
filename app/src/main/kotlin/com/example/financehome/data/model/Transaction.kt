@@ -40,5 +40,7 @@ data class Transaction(
     val isSynced: Boolean = false,
     val receiptImageUri: String? = null,
     val hasItemizedReceipt: Boolean = false,
-    val noReceiptNeeded: Boolean = false
+    val noReceiptNeeded: Boolean = false,
+    val linkedBillId: String? = null,
+    val linkedDebtId: String? = null
 )
