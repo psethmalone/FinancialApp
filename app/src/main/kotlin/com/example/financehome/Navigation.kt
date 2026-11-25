@@ -235,7 +235,12 @@ fun AppNavigation(
             onAddItem = { item -> transactionsViewModel.addReceiptItem(item) },
             onUpdateItem = { item -> transactionsViewModel.updateReceiptItem(item) },
             onDeleteItem = { item -> transactionsViewModel.deleteReceiptItem(item) },
-            onRemoveReceipt = { transactionsViewModel.removeReceipt(currentTx.id) }
+            onRemoveReceipt = { transactionsViewModel.removeReceipt(currentTx.id) },
+            onToggleNoReceipt = {
+                val newNoReceipt = !currentTx.noReceiptNeeded
+                transactionsViewModel.markNoReceiptNeeded(currentTx.id, newNoReceipt)
+                deepLinkedTransaction = currentTx.copy(noReceiptNeeded = newNoReceipt)
+            }
         )
     }
 }

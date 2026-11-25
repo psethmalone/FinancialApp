@@ -6,10 +6,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Savings
-import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -37,6 +34,8 @@ fun DebtDetailScreen(
 ) {
     var extraMonthlyPayment by remember { mutableStateOf(50.0) }
     var showAllAmortization by remember { mutableStateOf(false) }
+    var showEditDialog by remember { mutableStateOf(false) }
+    var showPayDialog by remember { mutableStateOf(false) }
 
     val simulation = remember(debt, extraMonthlyPayment) {
         viewModel.simulatePayoff(debt, extraMonthlyPayment)
@@ -58,6 +57,9 @@ fun DebtDetailScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showEditDialog = true }) {
+                        Icon(Icons.Default.Edit, contentDescription = "Edit Debt")
+                    }
                     IconButton(onClick = {
                         viewModel.deleteDebt(debt)
                         onBack()
@@ -121,6 +123,32 @@ fun DebtDetailScreen(
                                 text = currencyFormat.format(debt.minimumPayment),
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                             )
+                        }
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { showEditDialog = true },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Edit Account")
+                            }
+                            Button(
+                                onClick = { showPayDialog = true },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(Icons.Default.Payment, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Pay Debt")
+                            }
                         }
                     }
                 }
@@ -279,10 +307,30 @@ fun DebtDetailScreen(
                 AmortizationTableRow(row = row, currencyFormat = currencyFormat)
             }
 
-            item {
-                Spacer(modifier = Modifier.height(60.dp))
-            }
         }
+    }
+
+    if (showEditDialog) {
+        EditDebtDialog(
+            debt = debt,
+            onDismiss = { showEditDialog = false },
+            onSave = { name, curBal, origBal, apr, minPay, dueDay, type ->
+                viewModel.editDebt(debt.id, name, curBal, origBal, apr, minPay, dueDay, type)
+                showEditDialog = false
+            }
+        )
+    }
+
+    if (showPayDialog) {
+        PayDebtDialog(
+            debt = debt,
+            currencyFormat = currencyFormat,
+            onDismiss = { showPayDialog = false },
+            onConfirmPayment = { amount ->
+                viewModel.payDebt(debt, amount)
+                showPayDialog = false
+            }
+        )
     }
 }
 

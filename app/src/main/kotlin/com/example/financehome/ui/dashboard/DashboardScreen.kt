@@ -19,6 +19,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.financehome.data.local.CategoryTotal
@@ -420,13 +422,21 @@ fun DashboardScreen(
                                                     )
                                                 }
                                             }
-                                            IconButton(onClick = { viewModel.dismissMissingReceiptsBanner() }) {
-                                                Icon(
-                                                    Icons.Default.Close,
-                                                    contentDescription = "Dismiss",
-                                                    tint = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f),
-                                                    modifier = Modifier.size(18.dp)
-                                                )
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                TextButton(
+                                                    onClick = { viewModel.dismissMissingReceiptsBanner(markAllAsNoReceipt = true) },
+                                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text("Dismiss All", style = MaterialTheme.typography.labelSmall)
+                                                }
+                                                IconButton(onClick = { viewModel.dismissMissingReceiptsBanner(markAllAsNoReceipt = true) }) {
+                                                    Icon(
+                                                        Icons.Default.Close,
+                                                        contentDescription = "Dismiss",
+                                                        tint = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f),
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
                                             }
                                         }
 
@@ -445,27 +455,44 @@ fun DashboardScreen(
                                                         verticalAlignment = Alignment.CenterVertically,
                                                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                                                     ) {
-                                                        Column {
+                                                        Column(modifier = Modifier.widthIn(max = 140.dp)) {
                                                             Text(
                                                                 text = tx.merchant,
                                                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                                                color = MaterialTheme.colorScheme.onSurface
+                                                                color = MaterialTheme.colorScheme.onSurface,
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis
                                                             )
                                                             Text(
                                                                 text = "${currencyFormat.format(tx.amount)} • ${formatTimestamp(tx.timestampMillis)}",
                                                                 style = MaterialTheme.typography.labelSmall,
-                                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis
                                                             )
                                                         }
-                                                        FilledTonalButton(
-                                                            onClick = { selectedTransactionForDetail = tx },
-                                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                                            shape = RoundedCornerShape(8.dp),
-                                                            modifier = Modifier.height(32.dp)
+                                                        Row(
+                                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                            verticalAlignment = Alignment.CenterVertically
                                                         ) {
-                                                            Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(14.dp))
-                                                            Spacer(modifier = Modifier.width(4.dp))
-                                                            Text("Scan", style = MaterialTheme.typography.labelSmall)
+                                                            FilledTonalButton(
+                                                                onClick = { selectedTransactionForDetail = tx },
+                                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                                                shape = RoundedCornerShape(8.dp),
+                                                                modifier = Modifier.height(32.dp)
+                                                            ) {
+                                                                Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(14.dp))
+                                                                Spacer(modifier = Modifier.width(4.dp))
+                                                                Text("Scan", style = MaterialTheme.typography.labelSmall)
+                                                            }
+                                                            OutlinedButton(
+                                                                onClick = { viewModel.markNoReceiptNeeded(tx.id) },
+                                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                                                shape = RoundedCornerShape(8.dp),
+                                                                modifier = Modifier.height(32.dp)
+                                                            ) {
+                                                                Text("No Receipt", style = MaterialTheme.typography.labelSmall)
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -829,7 +856,12 @@ fun DashboardScreen(
             onAddItem = { item -> viewModel.addReceiptItem(item) },
             onUpdateItem = { item -> viewModel.updateReceiptItem(item) },
             onDeleteItem = { item -> viewModel.deleteReceiptItem(item) },
-            onRemoveReceipt = { viewModel.removeReceipt(currentTx.id) }
+            onRemoveReceipt = { viewModel.removeReceipt(currentTx.id) },
+            onToggleNoReceipt = {
+                val newNoReceipt = !currentTx.noReceiptNeeded
+                viewModel.markNoReceiptNeeded(currentTx.id, newNoReceipt)
+                selectedTransactionForDetail = currentTx.copy(noReceiptNeeded = newNoReceipt)
+            }
         )
     }
 
@@ -1083,7 +1115,8 @@ fun TransactionItemRow(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.weight(1f)
             ) {
                 Box(
                     modifier = Modifier
@@ -1103,11 +1136,13 @@ fun TransactionItemRow(
                     )
                 }
 
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = transaction.merchant,
                         style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1116,13 +1151,21 @@ fun TransactionItemRow(
                         Text(
                             text = transaction.category,
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         if (transaction.receiptImageUri != null || transaction.hasItemizedReceipt) {
                             Text(
                                 text = "• 🧾 Receipt",
                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                                 color = MaterialTheme.colorScheme.secondary
+                            )
+                        } else if (transaction.noReceiptNeeded) {
+                            Text(
+                                text = "• No Receipt",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline
                             )
                         }
                         Text(
@@ -1144,7 +1187,11 @@ fun TransactionItemRow(
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.Bold,
                     color = if (isDebit) ColorExpense else ColorIncome
-                )
+                ),
+                maxLines = 1,
+                softWrap = false,
+                textAlign = TextAlign.End,
+                modifier = Modifier.padding(start = 8.dp)
             )
         }
     }

@@ -39,5 +39,6 @@ data class Transaction(
     val isDiscretionary: Boolean,
     val isSynced: Boolean = false,
     val receiptImageUri: String? = null,
-    val hasItemizedReceipt: Boolean = false
+    val hasItemizedReceipt: Boolean = false,
+    val noReceiptNeeded: Boolean = false
 )

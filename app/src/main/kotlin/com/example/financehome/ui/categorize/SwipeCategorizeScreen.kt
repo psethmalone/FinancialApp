@@ -198,7 +198,12 @@ fun SwipeCategorizeScreen(
             onAddItem = { item -> viewModel.addReceiptItem(item) },
             onUpdateItem = { item -> viewModel.updateReceiptItem(item) },
             onDeleteItem = { item -> viewModel.deleteReceiptItem(item) },
-            onRemoveReceipt = { viewModel.removeReceipt(currentTx.id) }
+            onRemoveReceipt = { viewModel.removeReceipt(currentTx.id) },
+            onToggleNoReceipt = {
+                val newNoReceipt = !currentTx.noReceiptNeeded
+                viewModel.markNoReceiptNeeded(currentTx.id, newNoReceipt)
+                selectedTransactionForReceipt = currentTx.copy(noReceiptNeeded = newNoReceipt)
+            }
         )
     }
 }

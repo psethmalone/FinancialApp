@@ -43,12 +43,19 @@ interface TransactionDao {
         SELECT * FROM transactions
         WHERE receiptImageUri IS NULL
           AND hasItemizedReceipt = 0
+          AND noReceiptNeeded = 0
           AND type = 'DEBIT'
         ORDER BY timestampMillis DESC
         LIMIT :limit
         """
     )
     fun getTransactionsMissingReceipts(limit: Int = 10): Flow<List<Transaction>>
+
+    @Query("UPDATE transactions SET noReceiptNeeded = :noReceipt WHERE id = :id")
+    suspend fun markNoReceiptNeeded(id: String, noReceipt: Boolean = true)
+
+    @Query("UPDATE transactions SET noReceiptNeeded = 1 WHERE receiptImageUri IS NULL AND hasItemizedReceipt = 0 AND noReceiptNeeded = 0 AND type = 'DEBIT'")
+    suspend fun markAllMissingAsNoReceipt()
 
     @Query(
         """

@@ -84,6 +84,12 @@ class TransactionsViewModel @Inject constructor(
         }
     }
 
+    fun markNoReceiptNeeded(transactionId: String, noReceipt: Boolean = true) {
+        viewModelScope.launch {
+            transactionRepo.markNoReceiptNeeded(transactionId, noReceipt)
+        }
+    }
+
     fun addManualTransaction(
         amount: Double,
         merchant: String,

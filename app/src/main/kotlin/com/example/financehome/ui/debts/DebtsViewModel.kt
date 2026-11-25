@@ -18,6 +18,7 @@ import com.example.financehome.domain.WageCalculator
 import com.example.financehome.domain.WageConfig
 import com.example.financehome.domain.WageEstimate
 import com.example.financehome.data.model.Transaction
+import com.example.financehome.data.model.TransactionSource
 import com.example.financehome.data.model.TransactionType
 import com.example.financehome.data.repository.TransactionRepository
 import com.example.financehome.data.repository.SpendingAlertRepository
@@ -30,6 +31,8 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.Locale
+import java.util.UUID
 import javax.inject.Inject
 
 data class PayoffSimulation(
@@ -226,6 +229,70 @@ class DebtsViewModel @Inject constructor(
         }
     }
 
+    fun editDebt(
+        id: String,
+        name: String,
+        currentBalance: Double,
+        originalBalance: Double,
+        aprPercent: Double,
+        minimumPayment: Double,
+        dueDayOfMonth: Int,
+        type: DebtType
+    ) {
+        viewModelScope.launch {
+            val existing = debts.value.find { it.id == id }
+            val createdAt = existing?.createdAtMillis ?: System.currentTimeMillis()
+            val isPaid = existing?.isPaidThisMonth ?: false
+            val lastPaid = existing?.lastPaidTimestampMillis
+            val updated = Debt(
+                id = id,
+                name = name.trim(),
+                originalBalance = originalBalance,
+                currentBalance = currentBalance,
+                apr = aprPercent / 100.0,
+                minimumPayment = minimumPayment,
+                type = type,
+                createdAtMillis = createdAt,
+                dueDayOfMonth = dueDayOfMonth.coerceIn(1, 31),
+                isPaidThisMonth = isPaid,
+                lastPaidTimestampMillis = lastPaid,
+                isSynced = false
+            )
+            debtRepo.updateDebt(updated)
+        }
+    }
+
+    fun payDebt(debt: Debt, paymentAmount: Double) {
+        viewModelScope.launch {
+            val newBalance = maxOf(0.0, debt.currentBalance - paymentAmount)
+            debtRepo.updateDebt(
+                debt.copy(
+                    currentBalance = newBalance,
+                    isPaidThisMonth = true,
+                    lastPaidTimestampMillis = System.currentTimeMillis()
+                )
+            )
+            val isExtra = paymentAmount > debt.minimumPayment
+            val extraFormatted = String.format(Locale.US, "%.2f", paymentAmount - debt.minimumPayment)
+            val note = if (isExtra) "Debt Payment ($${extraFormatted} extra)" else "Debt Minimum Payment"
+            val tx = Transaction(
+                id = UUID.randomUUID().toString(),
+                amount = paymentAmount,
+                merchant = "${debt.name} Payment",
+                category = "Debts",
+                type = TransactionType.DEBIT,
+                source = TransactionSource.MANUAL,
+                timestampMillis = System.currentTimeMillis(),
+                rawNotificationText = null,
+                notes = note,
+                isDiscretionary = false,
+                isSynced = false,
+                noReceiptNeeded = true
+            )
+            transactionRepo.insertTransaction(tx)
+        }
+    }
+
     fun simulatePayoff(debt: Debt, extraMonthlyPayment: Double): PayoffSimulation {
         val effectivePayment = debt.minimumPayment + extraMonthlyPayment
         val months = DebtCalculator.monthsToPayoff(debt.currentBalance, debt.apr, effectivePayment)
@@ -282,6 +349,32 @@ class DebtsViewModel @Inject constructor(
     fun toggleBillPaid(bill: Bill) {
         viewModelScope.launch {
             billRepo.toggleBillPaid(bill)
+        }
+    }
+
+    fun payBill(bill: Bill) {
+        viewModelScope.launch {
+            billRepo.updateBill(
+                bill.copy(
+                    isPaidThisMonth = true,
+                    lastPaidTimestampMillis = System.currentTimeMillis()
+                )
+            )
+            val tx = Transaction(
+                id = UUID.randomUUID().toString(),
+                amount = bill.amount,
+                merchant = bill.name,
+                category = bill.category.ifEmpty { "Bills" },
+                type = TransactionType.DEBIT,
+                source = TransactionSource.MANUAL,
+                timestampMillis = System.currentTimeMillis(),
+                rawNotificationText = null,
+                notes = "Bill Payment: ${bill.name}",
+                isDiscretionary = false,
+                isSynced = false,
+                noReceiptNeeded = true
+            )
+            transactionRepo.insertTransaction(tx)
         }
     }
 

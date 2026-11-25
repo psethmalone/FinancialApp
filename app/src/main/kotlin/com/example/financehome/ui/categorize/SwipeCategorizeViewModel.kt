@@ -154,4 +154,8 @@ class SwipeCategorizeViewModel @Inject constructor(
     fun removeReceipt(transactionId: String) {
         viewModelScope.launch { receiptRepo.removeReceipt(transactionId) }
     }
+
+    fun markNoReceiptNeeded(transactionId: String, noReceipt: Boolean = true) {
+        viewModelScope.launch { transactionRepo.markNoReceiptNeeded(transactionId, noReceipt) }
+    }
 }

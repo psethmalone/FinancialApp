@@ -21,8 +21,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.ZoneId
 import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import javax.inject.Inject
 
 data class PhantomInvestmentItem(
@@ -33,6 +36,19 @@ data class PhantomInvestmentItem(
     val phantomValue: Double?,
     val gainLoss: Double?,
     val gainLossPct: Double?
+)
+
+data class MonthlyDiscretionaryCohort(
+    val monthTitle: String,
+    val yearMonth: YearMonth,
+    val isCompletedMonth: Boolean,
+    val totalSpent: Double,
+    val totalPhantomValue: Double,
+    val gainLoss: Double,
+    val gainLossPct: Double,
+    val projected10Y: Double,
+    val projected20Y: Double,
+    val items: List<PhantomInvestmentItem>
 )
 
 data class ProjectionCardData(
@@ -199,6 +215,47 @@ class OpportunityViewModel @Inject constructor(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = 0.0
+        )
+
+    val monthlyCohorts: StateFlow<List<MonthlyDiscretionaryCohort>> =
+        combine(phantomItems, assumedAnnualReturn) { items, rate ->
+            val currentYearMonth = YearMonth.now()
+            val grouped = items.groupBy { item ->
+                val localDate = Instant.ofEpochMilli(item.transaction.timestampMillis)
+                    .atZone(ZoneId.systemDefault())
+                    .toLocalDate()
+                YearMonth.from(localDate)
+            }
+            val formatter = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)
+            grouped.entries
+                .sortedByDescending { it.key }
+                .map { (ym, cohortItems) ->
+                    val spent = cohortItems.sumOf { it.transaction.amount }
+                    val phantomVal = cohortItems.sumOf { it.phantomValue ?: it.transaction.amount }
+                    val gl = phantomVal - spent
+                    val glPct = if (spent > 0.0) (gl / spent) * 100.0 else 0.0
+                    val p10 = InvestmentProjector.futureValue(phantomVal, rate, 10)
+                    val p20 = InvestmentProjector.futureValue(phantomVal, rate, 20)
+                    val isCompleted = ym.isBefore(currentYearMonth)
+                    val title = ym.format(formatter)
+
+                    MonthlyDiscretionaryCohort(
+                        monthTitle = title,
+                        yearMonth = ym,
+                        isCompletedMonth = isCompleted,
+                        totalSpent = spent,
+                        totalPhantomValue = phantomVal,
+                        gainLoss = gl,
+                        gainLossPct = glPct,
+                        projected10Y = p10,
+                        projected20Y = p20,
+                        items = cohortItems.sortedByDescending { it.transaction.timestampMillis }
+                    )
+                }
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
         )
 
     init {

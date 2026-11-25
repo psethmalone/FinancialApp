@@ -26,6 +26,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -212,7 +214,12 @@ fun TransactionsScreen(
             onAddItem = { item -> viewModel.addReceiptItem(item) },
             onUpdateItem = { item -> viewModel.updateReceiptItem(item) },
             onDeleteItem = { item -> viewModel.deleteReceiptItem(item) },
-            onRemoveReceipt = { viewModel.removeReceipt(transaction.id) }
+            onRemoveReceipt = { viewModel.removeReceipt(transaction.id) },
+            onToggleNoReceipt = {
+                val newNoReceipt = !transaction.noReceiptNeeded
+                viewModel.markNoReceiptNeeded(transaction.id, newNoReceipt)
+                selectedTransactionForEdit = transaction.copy(noReceiptNeeded = newNoReceipt)
+            }
         )
     }
 }
@@ -266,11 +273,13 @@ fun TransactionRowItem(
                     )
                 }
 
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = transaction.merchant,
                         style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -279,13 +288,21 @@ fun TransactionRowItem(
                         Text(
                             text = transaction.category,
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         if (hasReceipt) {
                             Text(
                                 text = "• 🧾 Receipt",
                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                                 color = MaterialTheme.colorScheme.secondary
+                            )
+                        } else if (transaction.noReceiptNeeded) {
+                            Text(
+                                text = "• No Receipt",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline
                             )
                         }
                         if (transaction.isDiscretionary && isDebit) {
@@ -309,7 +326,11 @@ fun TransactionRowItem(
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.Bold,
                     color = if (isDebit) ColorExpense else ColorIncome
-                )
+                ),
+                maxLines = 1,
+                softWrap = false,
+                textAlign = TextAlign.End,
+                modifier = Modifier.padding(start = 8.dp)
             )
         }
     }
@@ -332,7 +353,8 @@ fun TransactionDetailSheet(
     onAddItem: ((ReceiptItem) -> Unit)? = null,
     onUpdateItem: ((ReceiptItem) -> Unit)? = null,
     onDeleteItem: ((ReceiptItem) -> Unit)? = null,
-    onRemoveReceipt: (() -> Unit)? = null
+    onRemoveReceipt: (() -> Unit)? = null,
+    onToggleNoReceipt: (() -> Unit)? = null
 ) {
     var showZoomImage by remember { mutableStateOf(false) }
     var showAddItemDialog by remember { mutableStateOf(false) }
@@ -618,7 +640,7 @@ fun TransactionDetailSheet(
                     }
                 }
             } else if (!isScanning && receiptItems.isEmpty()) {
-                // Empty banner prompting to attach
+                // Empty banner prompting to attach or indicating no receipt needed
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
                     shape = RoundedCornerShape(12.dp),
@@ -634,19 +656,41 @@ fun TransactionDetailSheet(
                         Icon(
                             Icons.Default.ReceiptLong,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
+                            tint = if (transaction.noReceiptNeeded) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(36.dp)
                         )
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "No receipt attached",
+                                text = if (transaction.noReceiptNeeded) "No receipt needed" else "No receipt attached",
                                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
                             )
                             Text(
-                                text = "Snap a picture or choose from gallery to itemize groceries, fuel, and expenses.",
+                                text = if (transaction.noReceiptNeeded)
+                                    "This transaction is excluded from missing receipt reminders."
+                                else
+                                    "Snap a picture or choose from gallery to itemize groceries, fuel, and expenses.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            if (onToggleNoReceipt != null) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                OutlinedButton(
+                                    onClick = onToggleNoReceipt,
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (transaction.noReceiptNeeded) Icons.Default.Check else Icons.Default.Block,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = if (transaction.noReceiptNeeded) "Require Receipt Again" else "Mark as No Receipt Needed",
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                            }
                         }
                     }
                 }

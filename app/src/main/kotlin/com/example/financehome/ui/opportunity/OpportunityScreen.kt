@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.financehome.data.model.PortfolioHolding
@@ -62,6 +63,7 @@ fun OpportunityScreen(
     val totalSpent by viewModel.totalSpentOnDiscretionary.collectAsState()
     val totalPhantomVal by viewModel.totalPhantomValue.collectAsState()
     val totalMissedGainLoss by viewModel.totalMissedGainLoss.collectAsState()
+    val monthlyCohorts by viewModel.monthlyCohorts.collectAsState()
 
     // Projections state
     val assumedReturn by viewModel.assumedAnnualReturn.collectAsState()
@@ -219,6 +221,7 @@ fun OpportunityScreen(
                 1 -> RealMarketTrackingTab(
                     ticker = selectedTicker,
                     items = phantomItems,
+                    monthlyCohorts = monthlyCohorts,
                     totalSpent = totalSpent,
                     totalPhantomValue = totalPhantomVal,
                     totalGainLoss = totalMissedGainLoss,
@@ -1039,6 +1042,7 @@ fun SetHoldingDialog(
 fun RealMarketTrackingTab(
     ticker: String,
     items: List<PhantomInvestmentItem>,
+    monthlyCohorts: List<MonthlyDiscretionaryCohort>,
     totalSpent: Double,
     totalPhantomValue: Double,
     totalGainLoss: Double,
@@ -1046,6 +1050,7 @@ fun RealMarketTrackingTab(
     onRefresh: () -> Unit
 ) {
     val isPositive = totalGainLoss >= 0.0
+    var showMonthlyView by remember { mutableStateOf(true) }
 
     LazyColumn(
         modifier = Modifier
@@ -1145,12 +1150,31 @@ fun RealMarketTrackingTab(
             }
         }
 
-        // Section header
+        // Section header with view toggle
         item {
-            Text(
-                text = "Discretionary Transactions (${items.size})",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Discretionary Retrospective",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilterChip(
+                        selected = showMonthlyView,
+                        onClick = { showMonthlyView = true },
+                        label = { Text("Monthly", style = MaterialTheme.typography.labelSmall) }
+                    )
+                    FilterChip(
+                        selected = !showMonthlyView,
+                        onClick = { showMonthlyView = false },
+                        label = { Text("All (${items.size})", style = MaterialTheme.typography.labelSmall) }
+                    )
+                }
+            }
         }
 
         if (items.isEmpty()) {
@@ -1187,9 +1211,207 @@ fun RealMarketTrackingTab(
                     }
                 }
             }
+        } else if (showMonthlyView) {
+            items(monthlyCohorts, key = { it.yearMonth.toString() }) { cohort ->
+                MonthlyCohortCard(
+                    cohort = cohort,
+                    ticker = ticker,
+                    currencyFormat = currencyFormat
+                )
+            }
         } else {
             items(items, key = { it.transaction.id }) { item ->
                 PhantomTransactionRow(item = item, currencyFormat = currencyFormat)
+            }
+        }
+    }
+}
+
+@Composable
+fun MonthlyCohortCard(
+    cohort: MonthlyDiscretionaryCohort,
+    ticker: String,
+    currencyFormat: NumberFormat
+) {
+    var isExpanded by remember { mutableStateOf(false) }
+    val isPositive = cohort.gainLoss >= 0.0
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Header: Month Title & Status Badge
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = cohort.monthTitle,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = if (cohort.isCompletedMonth) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
+                        else MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.7f)
+                    ) {
+                        Text(
+                            text = if (cohort.isCompletedMonth) "Completed" else "In Progress",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.sp
+                            ),
+                            color = if (cohort.isCompletedMonth) MaterialTheme.colorScheme.secondary
+                            else MaterialTheme.colorScheme.tertiary,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isPositive) ColorIncome.copy(alpha = 0.15f) else ColorExpense.copy(alpha = 0.15f)
+                ) {
+                    Text(
+                        text = (if (isPositive) "+" else "") +
+                                currencyFormat.format(cohort.gainLoss) +
+                                String.format(Locale.US, " (%.1f%%)", cohort.gainLossPct),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = if (isPositive) ColorIncome else ColorExpense
+                        ),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+            }
+
+            // Spent vs Value
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text(
+                        text = "Non-Essential Spent",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = currencyFormat.format(cohort.totalSpent),
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = "Current Value in $ticker",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = currencyFormat.format(cohort.totalPhantomValue),
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                }
+            }
+
+            // Future projections banner for this month's cohort
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text("🚀", fontSize = 14.sp)
+                        Text(
+                            text = "Future value:",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold)
+                        )
+                    }
+                    Text(
+                        text = "10Y: ${currencyFormat.format(cohort.projected10Y)} • 20Y: ${currencyFormat.format(cohort.projected20Y)}",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                }
+            }
+
+            // Expand / Collapse line items
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { isExpanded = !isExpanded }
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${cohort.items.size} purchase${if (cohort.items.size == 1) "" else "s"}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = if (isExpanded) "Hide purchases" else "View purchases",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                    Icon(
+                        imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+
+            AnimatedVisibility(visible = isExpanded) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    cohort.items.forEach { item ->
+                        PhantomTransactionRow(item = item, currencyFormat = currencyFormat)
+                    }
+                }
             }
         }
     }
@@ -1223,23 +1445,33 @@ fun PhantomTransactionRow(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = transaction.merchant,
-                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold)
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = "$dateFormatted • Spent ${currencyFormat.format(transaction.amount)}",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
                 if (hasPrice) {
-                    Column(horizontalAlignment = Alignment.End) {
+                    Column(
+                        horizontalAlignment = Alignment.End,
+                        modifier = Modifier.padding(start = 8.dp)
+                    ) {
                         Text(
                             text = "Worth " + currencyFormat.format(item.phantomValue),
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            maxLines = 1,
+                            softWrap = false,
+                            textAlign = TextAlign.End
                         )
                         Text(
                             text = (if (isGain) "+" else "") +
@@ -1248,14 +1480,21 @@ fun PhantomTransactionRow(
                             style = MaterialTheme.typography.bodySmall.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = if (isGain) ColorIncome else ColorExpense
-                            )
+                            ),
+                            maxLines = 1,
+                            softWrap = false,
+                            textAlign = TextAlign.End
                         )
                     }
                 } else {
                     Text(
                         text = "Calculating...",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.outline
+                        color = MaterialTheme.colorScheme.outline,
+                        maxLines = 1,
+                        softWrap = false,
+                        textAlign = TextAlign.End,
+                        modifier = Modifier.padding(start = 8.dp)
                     )
                 }
             }

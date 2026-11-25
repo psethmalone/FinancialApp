@@ -55,6 +55,9 @@ fun DebtsScreen(
     var selectedTab by remember { mutableStateOf(ObligationTab.BILLS) }
     var showAddDebtDialog by remember { mutableStateOf(false) }
     var showAddBillDialog by remember { mutableStateOf(false) }
+    var debtToEdit by remember { mutableStateOf<Debt?>(null) }
+    var debtToPay by remember { mutableStateOf<Debt?>(null) }
+    var billToPay by remember { mutableStateOf<Bill?>(null) }
 
     val currencyFormat = NumberFormat.getCurrencyInstance(Locale.US)
 
@@ -213,7 +216,13 @@ fun DebtsScreen(
                         BillCardItem(
                             bill = bill,
                             currencyFormat = currencyFormat,
-                            onTogglePaid = { viewModel.toggleBillPaid(bill) },
+                            onTogglePaid = {
+                                if (bill.isPaidThisMonth) {
+                                    viewModel.toggleBillPaid(bill)
+                                } else {
+                                    billToPay = bill
+                                }
+                            },
                             onDelete = { viewModel.deleteBill(bill) }
                         )
                     }
@@ -237,7 +246,9 @@ fun DebtsScreen(
                         DebtCardItem(
                             debt = debt,
                             currencyFormat = currencyFormat,
-                            onClick = { onDebtSelected(debt) }
+                            onClick = { onDebtSelected(debt) },
+                            onEdit = { debtToEdit = debt },
+                            onPay = { debtToPay = debt }
                         )
                     }
                 }
@@ -265,6 +276,41 @@ fun DebtsScreen(
             onAddDebt = { name, balance, apr, minPayment, type, dueDay ->
                 viewModel.addDebt(name, balance, apr, minPayment, type, dueDay)
                 showAddDebtDialog = false
+            }
+        )
+    }
+
+    if (billToPay != null) {
+        ConfirmPayBillDialog(
+            bill = billToPay!!,
+            currencyFormat = currencyFormat,
+            onDismiss = { billToPay = null },
+            onConfirm = {
+                viewModel.payBill(billToPay!!)
+                billToPay = null
+            }
+        )
+    }
+
+    if (debtToEdit != null) {
+        EditDebtDialog(
+            debt = debtToEdit!!,
+            onDismiss = { debtToEdit = null },
+            onSave = { name, curBal, origBal, apr, minPay, dueDay, type ->
+                viewModel.editDebt(debtToEdit!!.id, name, curBal, origBal, apr, minPay, dueDay, type)
+                debtToEdit = null
+            }
+        )
+    }
+
+    if (debtToPay != null) {
+        PayDebtDialog(
+            debt = debtToPay!!,
+            currencyFormat = currencyFormat,
+            onDismiss = { debtToPay = null },
+            onConfirmPayment = { amount ->
+                viewModel.payDebt(debtToPay!!, amount)
+                debtToPay = null
             }
         )
     }
@@ -396,7 +442,9 @@ fun BillCardItem(
 fun DebtCardItem(
     debt: Debt,
     currencyFormat: NumberFormat,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onEdit: () -> Unit,
+    onPay: () -> Unit
 ) {
     val aprPercent = debt.apr * 100.0
     val aprColor = when {
@@ -426,14 +474,15 @@ fun DebtCardItem(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text(
                             text = debt.name,
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            maxLines = 1
                         )
                         Surface(
                             shape = RoundedCornerShape(4.dp),
@@ -450,18 +499,42 @@ fun DebtCardItem(
                             )
                         }
                     }
-                    Text(
-                        text = debt.type.name.replace("_", " "),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = debt.type.name.replace("_", " "),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (debt.isPaidThisMonth) {
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = ColorIncome.copy(alpha = 0.15f)
+                            ) {
+                                Text(
+                                    text = "Paid this cycle",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 10.sp
+                                    ),
+                                    color = ColorIncome,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                )
+                            }
+                        }
+                    }
                 }
                 Text(
                     text = currencyFormat.format(debt.currentBalance),
                     style = MaterialTheme.typography.titleLarge.copy(
                         fontWeight = FontWeight.Bold,
-                        color = ColorExpense
-                    )
+                        color = if (debt.currentBalance == 0.0) ColorIncome else ColorExpense
+                    ),
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.padding(start = 8.dp)
                 )
             }
 
@@ -497,6 +570,36 @@ fun DebtCardItem(
                         text = currencyFormat.format(debt.minimumPayment) + "/mo",
                         style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
                     )
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(
+                    onClick = onEdit,
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    modifier = Modifier.height(34.dp)
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Edit", style = MaterialTheme.typography.labelSmall)
+                }
+
+                Button(
+                    onClick = onPay,
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                    modifier = Modifier.height(34.dp)
+                ) {
+                    Icon(Icons.Default.Payment, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Pay Debt", style = MaterialTheme.typography.labelSmall)
                 }
             }
         }
@@ -1105,4 +1208,350 @@ fun DebtPayoffOptimizerCard(
             }
         }
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bill & Debt Payment & Edit Dialogs
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun ConfirmPayBillDialog(
+    bill: Bill,
+    currencyFormat: NumberFormat,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Pay ${bill.name}?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Marking this bill as paid will record a ${currencyFormat.format(bill.amount)} expense transaction and deduct it from your current cycle's available funds."
+                )
+                Text(
+                    text = "Category: ${bill.category} • Due Day ${bill.dueDayOfMonth}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = onConfirm) {
+                Text("Pay ${currencyFormat.format(bill.amount)}")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EditDebtDialog(
+    debt: Debt,
+    onDismiss: () -> Unit,
+    onSave: (name: String, currentBalance: Double, originalBalance: Double, aprPercent: Double, minPayment: Double, dueDay: Int, type: DebtType) -> Unit
+) {
+    var name by remember { mutableStateOf(debt.name) }
+    var currentBalanceText by remember { mutableStateOf(String.format(Locale.US, "%.2f", debt.currentBalance)) }
+    var originalBalanceText by remember { mutableStateOf(String.format(Locale.US, "%.2f", debt.originalBalance)) }
+    var aprText by remember { mutableStateOf(String.format(Locale.US, "%.2f", debt.apr * 100.0)) }
+    var minPaymentText by remember { mutableStateOf(String.format(Locale.US, "%.2f", debt.minimumPayment)) }
+    var dueDayText by remember { mutableStateOf(debt.dueDayOfMonth.toString()) }
+    var selectedType by remember { mutableStateOf(debt.type) }
+
+    val dueDayInt = dueDayText.toIntOrNull() ?: debt.dueDayOfMonth
+    val isValid = name.isNotBlank() &&
+            (currentBalanceText.toDoubleOrNull() ?: -1.0) >= 0.0 &&
+            (originalBalanceText.toDoubleOrNull() ?: -1.0) >= 0.0 &&
+            (aprText.toDoubleOrNull() ?: -1.0) >= 0.0 &&
+            (minPaymentText.toDoubleOrNull() ?: 0.0) > 0.0 &&
+            dueDayInt in 1..31
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit Debt Account") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Debt Name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = currentBalanceText,
+                        onValueChange = { currentBalanceText = it },
+                        label = { Text("Current Bal ($)") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    OutlinedTextField(
+                        value = originalBalanceText,
+                        onValueChange = { originalBalanceText = it },
+                        label = { Text("Orig Bal ($)") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = aprText,
+                        onValueChange = { aprText = it },
+                        label = { Text("APR %") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    OutlinedTextField(
+                        value = minPaymentText,
+                        onValueChange = { minPaymentText = it },
+                        label = { Text("Min Pay ($)") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                OutlinedTextField(
+                    value = dueDayText,
+                    onValueChange = { dueDayText = it },
+                    label = { Text("Due Day of Month (1-31)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Text(text = "Debt Type", style = MaterialTheme.typography.labelMedium)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    DebtType.values().forEach { type ->
+                        FilterChip(
+                            selected = selectedType == type,
+                            onClick = { selectedType = type },
+                            label = { Text(type.name.take(6), style = MaterialTheme.typography.labelSmall) }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val curBal = currentBalanceText.toDoubleOrNull() ?: return@Button
+                    val origBal = originalBalanceText.toDoubleOrNull() ?: curBal
+                    val apr = aprText.toDoubleOrNull() ?: return@Button
+                    val minPayment = minPaymentText.toDoubleOrNull() ?: return@Button
+                    onSave(name, curBal, origBal, apr, minPayment, dueDayInt, selectedType)
+                },
+                enabled = isValid
+            ) {
+                Text("Save Changes")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+fun PayDebtDialog(
+    debt: Debt,
+    currencyFormat: NumberFormat,
+    onDismiss: () -> Unit,
+    onConfirmPayment: (paymentAmount: Double) -> Unit
+) {
+    var paymentAmountText by remember {
+        mutableStateOf(String.format(Locale.US, "%.2f", debt.minimumPayment))
+    }
+
+    val paymentAmount = paymentAmountText.toDoubleOrNull() ?: 0.0
+    val newBalance = maxOf(0.0, debt.currentBalance - paymentAmount)
+    val isValid = paymentAmount > 0.0
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    Icons.Default.Payment,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Text("Pay ${debt.name}")
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // Info Banner
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Current Balance:", style = MaterialTheme.typography.bodySmall)
+                            Text(
+                                currencyFormat.format(debt.currentBalance),
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Monthly Minimum:", style = MaterialTheme.typography.bodySmall)
+                            Text(
+                                currencyFormat.format(debt.minimumPayment),
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
+                            )
+                        }
+                    }
+                }
+
+                Text(
+                    text = "Quick Payment Options",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
+                )
+
+                // Quick Chips
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        FilterChip(
+                            selected = paymentAmount == debt.minimumPayment,
+                            onClick = {
+                                paymentAmountText = String.format(Locale.US, "%.2f", debt.minimumPayment)
+                            },
+                            label = { Text("Minimum (${currencyFormat.format(debt.minimumPayment)})", style = MaterialTheme.typography.labelSmall) },
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = paymentAmount == debt.minimumPayment + 25.0,
+                            onClick = {
+                                paymentAmountText = String.format(Locale.US, "%.2f", debt.minimumPayment + 25.0)
+                            },
+                            label = { Text("+$25 Extra", style = MaterialTheme.typography.labelSmall) }
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        FilterChip(
+                            selected = paymentAmount == debt.minimumPayment + 50.0,
+                            onClick = {
+                                paymentAmountText = String.format(Locale.US, "%.2f", debt.minimumPayment + 50.0)
+                            },
+                            label = { Text("+$50 Extra", style = MaterialTheme.typography.labelSmall) }
+                        )
+                        FilterChip(
+                            selected = paymentAmount == debt.minimumPayment + 100.0,
+                            onClick = {
+                                paymentAmountText = String.format(Locale.US, "%.2f", debt.minimumPayment + 100.0)
+                            },
+                            label = { Text("+$100 Extra", style = MaterialTheme.typography.labelSmall) }
+                        )
+                        FilterChip(
+                            selected = paymentAmount == debt.currentBalance,
+                            onClick = {
+                                paymentAmountText = String.format(Locale.US, "%.2f", debt.currentBalance)
+                            },
+                            label = { Text("Full Balance", style = MaterialTheme.typography.labelSmall) }
+                        )
+                    }
+                }
+
+                // Custom Amount Input
+                OutlinedTextField(
+                    value = paymentAmountText,
+                    onValueChange = { paymentAmountText = it },
+                    label = { Text("Payment Amount ($)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // Remaining Balance Preview
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "New Remaining Balance:",
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium)
+                        )
+                        Text(
+                            text = currencyFormat.format(newBalance),
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = if (newBalance == 0.0) ColorIncome else MaterialTheme.colorScheme.primary
+                            )
+                        )
+                    }
+                }
+
+                Text(
+                    text = "Deducts this payment from your cash flow & records a transaction.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (isValid) {
+                        onConfirmPayment(paymentAmount)
+                    }
+                },
+                enabled = isValid
+            ) {
+                Text("Confirm & Pay")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }

@@ -92,4 +92,12 @@ class TransactionRepository @Inject constructor(
             notes = notes
         )
     }
+
+    suspend fun markNoReceiptNeeded(id: String, noReceipt: Boolean = true) {
+        transactionDao.markNoReceiptNeeded(id, noReceipt)
+    }
+
+    suspend fun markAllMissingAsNoReceipt() {
+        transactionDao.markAllMissingAsNoReceipt()
+    }
 }

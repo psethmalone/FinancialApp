@@ -305,8 +305,19 @@ class DashboardViewModel @Inject constructor(
                 initialValue = emptyList()
             )
 
-    fun dismissMissingReceiptsBanner() {
+    fun dismissMissingReceiptsBanner(markAllAsNoReceipt: Boolean = false) {
         showMissingReceiptsBanner.value = false
+        if (markAllAsNoReceipt) {
+            viewModelScope.launch {
+                transactionRepo.markAllMissingAsNoReceipt()
+            }
+        }
+    }
+
+    fun markNoReceiptNeeded(transactionId: String, noReceipt: Boolean = true) {
+        viewModelScope.launch {
+            transactionRepo.markNoReceiptNeeded(transactionId, noReceipt)
+        }
     }
 
     val netPosition: StateFlow<Double> =
