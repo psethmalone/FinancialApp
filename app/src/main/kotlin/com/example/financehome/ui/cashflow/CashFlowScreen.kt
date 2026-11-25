@@ -175,7 +175,7 @@ fun CashFlowScreen(
                             )
                         }
 
-                        // 2. Interactive Paydays & Due Dates Calendar (2nd item in Cash Flow, with 3-paycheck countdown, monthly glimpse, and in-calendar forward schedule)
+                        // 2. Interactive Paydays & Due Dates Calendar (2nd item in Cash Flow, with 3-paycheck countdown, and in-calendar forward schedule)
                         item {
                             CashFlowCalendarCard(
                                 bills = bills,
@@ -197,7 +197,18 @@ fun CashFlowScreen(
                             )
                         }
 
-                        // 3. Paycheck Allocation Card (Cash Needed This Check vs Steady Fixed Reserve & Due This Pay Cycle checklist)
+                        // 3. Monthly Financial Outlook Card (macro monthly view of Inflows, Bills, Debts, Net Surplus)
+                        item {
+                            CashFlowMonthlyOutlookCard(
+                                bills = bills,
+                                debts = debts,
+                                paycheckConfig = paycheckConfig,
+                                wageEstimate = wageEstimate,
+                                currencyFormat = currencyFormat
+                            )
+                        }
+
+                        // 4. Paycheck Allocation Card (Cash Needed This Check vs Steady Fixed Reserve & Due This Pay Cycle checklist)
                         item {
                             CashFlowPaycheckPlannerCard(
                                 breakdown = paycheckBreakdown,
@@ -837,18 +848,6 @@ fun CashFlowCalendarCard(
         PaycheckCalculator.calculateThreePaycheckCountdown(anchorDate, paycheckConfig.frequency)
     }
 
-    val monthlyGlimpse = remember(displayedMonth, bills, debts, paycheckConfig, anchorDate, wageEstimate) {
-        PaycheckCalculator.calculateMonthlyGlimpse(
-            year = displayedMonth.year,
-            month = displayedMonth.monthValue,
-            bills = bills,
-            debts = debts,
-            config = paycheckConfig,
-            anchorPayDate = anchorDate,
-            currentTakeHomePay = wageEstimate?.effectiveTakeHomePay ?: paycheckConfig.typicalTakeHomePay
-        )
-    }
-
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -943,124 +942,6 @@ fun CashFlowCalendarCard(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                        }
-                    }
-                }
-            }
-
-            // Monthly Financial Outlook Quick Glimpse
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surface,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "${displayedMonth.format(DateTimeFormatter.ofPattern("MMMM", Locale.US))} Financial Outlook",
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = if (monthlyGlimpse.netSurplus >= 0) ColorIncome.copy(alpha = 0.15f) else ColorExpense.copy(alpha = 0.15f)
-                        ) {
-                            Text(
-                                text = "${if (monthlyGlimpse.netSurplus >= 0) "+" else ""}${currencyFormat.format(monthlyGlimpse.netSurplus)} Net",
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = if (monthlyGlimpse.netSurplus >= 0) ColorIncome else ColorExpense,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        // Est Income
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                                .padding(8.dp)
-                        ) {
-                            Text(
-                                text = "Est. Income",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = currencyFormat.format(monthlyGlimpse.estimatedIncome),
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                color = ColorIncome,
-                                maxLines = 1,
-                                softWrap = false
-                            )
-                            Text(
-                                text = "${monthlyGlimpse.payDaysCount} check${if (monthlyGlimpse.payDaysCount == 1) "" else "s"}",
-                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                                color = MaterialTheme.colorScheme.outline
-                            )
-                        }
-
-                        // Bills
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                                .padding(8.dp)
-                        ) {
-                            Text(
-                                text = "Total Bills",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = currencyFormat.format(monthlyGlimpse.totalBills),
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                softWrap = false
-                            )
-                            Text(
-                                text = "${bills.size} bill${if (bills.size == 1) "" else "s"}",
-                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                                color = MaterialTheme.colorScheme.outline
-                            )
-                        }
-
-                        // Debts
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                                .padding(8.dp)
-                        ) {
-                            Text(
-                                text = "Total Debts",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = currencyFormat.format(monthlyGlimpse.totalDebts),
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                softWrap = false
-                            )
-                            Text(
-                                text = "Min payments",
-                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                                color = MaterialTheme.colorScheme.outline
-                            )
                         }
                     }
                 }
@@ -1632,6 +1513,336 @@ fun ForwardPaycheckScheduleSection(
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3c. Monthly Financial Outlook Card (Macro Monthly Inflow, Bills, Debts, Net)
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun CashFlowMonthlyOutlookCard(
+    bills: List<Bill>,
+    debts: List<Debt>,
+    paycheckConfig: PaycheckConfig,
+    wageEstimate: WageEstimate?,
+    currencyFormat: NumberFormat,
+    modifier: Modifier = Modifier
+) {
+    var displayedMonth by remember { mutableStateOf(YearMonth.now()) }
+    val anchorDate = remember(paycheckConfig.anchorPayDateEpochDay) {
+        LocalDate.ofEpochDay(paycheckConfig.anchorPayDateEpochDay)
+    }
+
+    val monthlyGlimpse = remember(displayedMonth, bills, debts, paycheckConfig, anchorDate, wageEstimate) {
+        PaycheckCalculator.calculateMonthlyGlimpse(
+            year = displayedMonth.year,
+            month = displayedMonth.monthValue,
+            bills = bills,
+            debts = debts,
+            config = paycheckConfig,
+            anchorPayDate = anchorDate,
+            currentTakeHomePay = wageEstimate?.effectiveTakeHomePay ?: paycheckConfig.typicalTakeHomePay
+        )
+    }
+
+    val isCurrentMonth = displayedMonth == YearMonth.now()
+    val isNetPositive = monthlyGlimpse.netSurplus >= 0
+    val totalObligations = monthlyGlimpse.totalObligations
+    val settledObligations = (totalObligations - monthlyGlimpse.unpaidObligations).coerceAtLeast(0.0)
+    val settlementProgress = if (totalObligations > 0.0) {
+        (settledObligations / totalObligations).toFloat().coerceIn(0f, 1f)
+    } else 1f
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            // Header with month navigation and net surplus badge
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f, fill = false)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Insights,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "Monthly Financial Outlook",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            IconButton(
+                                onClick = { displayedMonth = displayedMonth.minusMonths(1) },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.ChevronLeft,
+                                    contentDescription = "Previous Month",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Text(
+                                text = displayedMonth.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)),
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            IconButton(
+                                onClick = { displayedMonth = displayedMonth.plusMonths(1) },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.ChevronRight,
+                                    contentDescription = "Next Month",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            if (!isCurrentMonth) {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable { displayedMonth = YearMonth.now() }
+                                        .padding(start = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "Today",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isNetPositive) ColorIncome.copy(alpha = 0.15f) else ColorExpense.copy(alpha = 0.15f)
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.End,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = if (isNetPositive) "NET SURPLUS" else "NET DEFICIT",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = if (isNetPositive) ColorIncome else ColorExpense
+                        )
+                        Text(
+                            text = "${if (isNetPositive) "+" else ""}${currencyFormat.format(monthlyGlimpse.netSurplus)}",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = if (isNetPositive) ColorIncome else ColorExpense
+                        )
+                    }
+                }
+            }
+
+            // 3-Column Macro Grid: Est. Income, Total Bills, Total Debts
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Est. Income
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(ColorIncome))
+                        Text(
+                            text = "Est. Income",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = currencyFormat.format(monthlyGlimpse.estimatedIncome),
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        color = ColorIncome,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "${monthlyGlimpse.payDaysCount} check${if (monthlyGlimpse.payDaysCount == 1) "" else "s"}${if (monthlyGlimpse.payDaysCount >= 3) " • 3-Check!" else ""}",
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                        color = if (monthlyGlimpse.payDaysCount >= 3) ColorIncome else MaterialTheme.colorScheme.outline,
+                        fontWeight = if (monthlyGlimpse.payDaysCount >= 3) FontWeight.Bold else FontWeight.Normal
+                    )
+                }
+
+                // Total Bills
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(ColorWarning))
+                        Text(
+                            text = "Total Bills",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = currencyFormat.format(monthlyGlimpse.totalBills),
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = if (monthlyGlimpse.unpaidBills <= 0.001) "All settled" else "${currencyFormat.format(monthlyGlimpse.unpaidBills)} unpaid",
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                        color = if (monthlyGlimpse.unpaidBills <= 0.001) ColorIncome else MaterialTheme.colorScheme.outline
+                    )
+                }
+
+                // Total Debts
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(ColorExpense))
+                        Text(
+                            text = "Total Debts",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = currencyFormat.format(monthlyGlimpse.totalDebts),
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = if (monthlyGlimpse.unpaidDebts <= 0.001) "All settled" else "${currencyFormat.format(monthlyGlimpse.unpaidDebts)} unpaid",
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                        color = if (monthlyGlimpse.unpaidDebts <= 0.001) ColorIncome else MaterialTheme.colorScheme.outline
+                    )
+                }
+            }
+
+            // Settlement Progress and Summary Bar
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Obligations Settlement",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "${(settlementProgress * 100).toInt()}% settled (${currencyFormat.format(settledObligations)} / ${currencyFormat.format(totalObligations)})",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    LinearProgressIndicator(
+                        progress = { settlementProgress },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp)),
+                        color = if (settlementProgress >= 1f) ColorIncome else MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (monthlyGlimpse.unpaidObligations > 0.001)
+                                "Unpaid remaining: ${currencyFormat.format(monthlyGlimpse.unpaidObligations)}"
+                            else
+                                "🎉 All monthly obligations paid!",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                            color = if (monthlyGlimpse.unpaidObligations > 0.001) MaterialTheme.colorScheme.onSurfaceVariant else ColorIncome
+                        )
+                        Text(
+                            text = if (isNetPositive) "Cash-flow positive" else "Deficit risk",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            color = if (isNetPositive) ColorIncome else ColorExpense
+                        )
                     }
                 }
             }
