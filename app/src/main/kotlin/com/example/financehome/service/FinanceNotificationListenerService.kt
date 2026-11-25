@@ -30,6 +30,13 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.util.UUID
 
+import android.content.ComponentName
+import android.content.pm.PackageManager
+import androidx.core.app.NotificationManagerCompat
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
 class FinanceNotificationListenerService : NotificationListenerService() {
 
     @EntryPoint
@@ -48,6 +55,65 @@ class FinanceNotificationListenerService : NotificationListenerService() {
 
     companion object {
         private const val TAG = "FinanceNotification"
+        private val _isConnected = MutableStateFlow(false)
+        val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
+
+        /**
+         * Rebinds the notification listener service if the OS disconnected it.
+         */
+        fun rebindService(context: Context) {
+            val enabledPackages = NotificationManagerCompat.getEnabledListenerPackages(context)
+            if (enabledPackages.contains(context.packageName)) {
+                try {
+                    val componentName = ComponentName(context, FinanceNotificationListenerService::class.java)
+                    val pm = context.packageManager
+                    pm.setComponentEnabledSetting(
+                        componentName,
+                        PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                        PackageManager.DONT_KILL_APP
+                    )
+                    pm.setComponentEnabledSetting(
+                        componentName,
+                        PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                        PackageManager.DONT_KILL_APP
+                    )
+                    Log.i(TAG, "Toggled listener component to trigger system rebind")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to toggle listener component", e)
+                }
+            }
+        }
+    }
+
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        _isConnected.value = true
+        Log.i(TAG, "Notification listener connected successfully!")
+        getEntryPoint()?.logRepository()?.logEvent(
+            packageName = "system",
+            summaryText = "Notification Listener Connected",
+            status = "CONNECTED",
+            isSuccess = true
+        )
+    }
+
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        _isConnected.value = false
+        Log.w(TAG, "Notification listener disconnected! Attempting rebind...")
+        getEntryPoint()?.logRepository()?.logEvent(
+            packageName = "system",
+            summaryText = "Notification Listener Disconnected",
+            status = "DISCONNECTED",
+            isSuccess = false
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                requestRebind(ComponentName(this, FinanceNotificationListenerService::class.java))
+            } catch (e: Exception) {
+                Log.e(TAG, "requestRebind failed", e)
+            }
+        }
     }
 
     private fun getEntryPoint(): ServiceEntryPoint? {
@@ -64,6 +130,7 @@ class FinanceNotificationListenerService : NotificationListenerService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        _isConnected.value = false
         serviceScope.cancel()
     }
 
@@ -89,8 +156,26 @@ class FinanceNotificationListenerService : NotificationListenerService() {
             val config = filterRepo.config.value
             val isSms = filterRepo.isSmsApp(packageName)
 
-            if (!filterRepo.isPackageMonitored(packageName)) {
-                // If not explicitly monitored and not a known bank/sms app in defaults, skip
+            val isMonitored = filterRepo.isPackageMonitored(packageName)
+
+            if (!isMonitored) {
+                // If it contains financial signs, log why it was skipped so user has visibility in diagnostics!
+                val sampleText = listOfNotNull(title, text, bigText).joinToString(" ")
+                if (sampleText.contains("$") ||
+                    packageName.contains("bank", ignoreCase = true) ||
+                    packageName.contains("pay", ignoreCase = true) ||
+                    packageName.contains("card", ignoreCase = true) ||
+                    packageName.contains("credit", ignoreCase = true) ||
+                    packageName.contains("citi", ignoreCase = true) ||
+                    packageName.contains("capitalone", ignoreCase = true)
+                ) {
+                    logRepo?.logEvent(
+                        packageName = packageName,
+                        summaryText = sampleText.take(120),
+                        status = "Skipped: App not monitored (Enable in Settings)",
+                        isSuccess = false
+                    )
+                }
                 return
             }
 

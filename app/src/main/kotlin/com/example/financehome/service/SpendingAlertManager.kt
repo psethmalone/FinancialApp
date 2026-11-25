@@ -6,7 +6,9 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import com.example.financehome.MainActivity
 import com.example.financehome.R
 import com.example.financehome.data.local.BillDao
@@ -90,12 +92,12 @@ class SpendingAlertManager @Inject constructor(
             // Case 1: Deficit / Overspend
             status.isDeficit && config.alertOnDeficit -> {
                 val deficitStr = currencyFormat.format(-status.remainingSafeToSpend)
-                title = "?? STOP SPENDING: Paycheck Cushion Depleted!"
+                title = "🚨 STOP SPENDING: Paycheck Cushion Depleted!"
                 body = "Spent $amountStr at ${transaction.merchant}. You are $deficitStr over your safe-to-spend cushion!"
             }
             // Case 2: Low Cushion Threshold Reached
             status.isLowWarning -> {
-                title = "?? Low Safe-to-Spend: $remainingStr Remaining"
+                title = "⚠️ Low Safe-to-Spend: $remainingStr Remaining"
                 body = "Spent $amountStr at ${transaction.merchant}. Only $remainingStr left for ${status.daysUntilPay} days until payday ($dailyStr/day pace)."
             }
             // Case 3: Every Purchase Balance Update
@@ -178,6 +180,11 @@ class SpendingAlertManager @Inject constructor(
         body: String,
         transactionId: String? = null
     ) {
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+            Log.w("SpendingAlertManager", "Cannot post notification: App notifications are disabled in Android Settings!")
+            return
+        }
+
         // Main tap intent -> opens Cash Flow tab
         val mainIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -217,7 +224,7 @@ class SpendingAlertManager @Inject constructor(
             )
             builder.addAction(
                 android.R.drawable.ic_menu_camera,
-                "?? Add Receipt",
+                "📷 Add Receipt",
                 receiptPendingIntent
             )
         }
@@ -235,7 +242,7 @@ class SpendingAlertManager @Inject constructor(
         )
         builder.addAction(
             android.R.drawable.ic_dialog_info,
-            "?? View Cash Flow",
+            "📊 View Cash Flow",
             cashFlowPendingIntent
         )
 
@@ -252,12 +259,12 @@ class SpendingAlertManager @Inject constructor(
 
         when (level) {
             SafeToSpendAlertLevel.DEFICIT_STOP -> {
-                title = "?? STOP SPENDING: Paycheck Cushion Depleted!"
+                title = "🚨 STOP SPENDING: Paycheck Cushion Depleted!"
                 body = "Spent $48.50 at Target. You are ${currencyFormat.format(23.50)} over your safe-to-spend cushion for this paycheck!"
             }
             SafeToSpendAlertLevel.LOW_WARNING -> {
                 val threshold = spendingAlertRepo.config.value.lowCushionThreshold
-                title = "?? Low Safe-to-Spend: ${currencyFormat.format(threshold * 0.65)} Remaining"
+                title = "⚠️ Low Safe-to-Spend: ${currencyFormat.format(threshold * 0.65)} Remaining"
                 body = "Spent $24.00 at Grocery Mart. Only ${currencyFormat.format(threshold * 0.65)} left for 5 days until payday (${currencyFormat.format(13.00)}/day pace)."
             }
             SafeToSpendAlertLevel.HEALTHY -> {

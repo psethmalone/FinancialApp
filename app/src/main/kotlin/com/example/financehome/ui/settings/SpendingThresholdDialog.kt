@@ -19,6 +19,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.Intent
+import android.provider.Settings
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.app.NotificationManagerCompat
 import com.example.financehome.domain.SpendingAlertConfig
 import com.example.financehome.ui.theme.ColorWarning
 
@@ -30,6 +34,11 @@ fun SpendingThresholdDialog(
     onSave: (SpendingAlertConfig) -> Unit,
     onSendTestAlert: () -> Unit
 ) {
+    val context = LocalContext.current
+    val areNotificationsEnabled = remember {
+        NotificationManagerCompat.from(context).areNotificationsEnabled()
+    }
+
     var isAlertsEnabled by remember { mutableStateOf(currentConfig.isAlertsEnabled) }
     var notifyOnEveryPurchase by remember { mutableStateOf(currentConfig.notifyOnEveryPurchase) }
     var lowThresholdText by remember { mutableStateOf(currentConfig.lowCushionThreshold.toInt().toString()) }
@@ -211,6 +220,35 @@ fun SpendingThresholdDialog(
 
                     HorizontalDivider()
 
+                    if (!areNotificationsEnabled) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    text = "⚠️ Notifications are blocked in Android Settings. Spending alerts cannot be shown until notifications are allowed.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                                Button(
+                                    onClick = {
+                                        val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                        }
+                                        context.startActivity(intent)
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("Enable Notifications in Android Settings", style = MaterialTheme.typography.labelMedium)
+                                }
+                            }
+                        }
+                    }
+
                     // Test Alert Button
                     OutlinedButton(
                         onClick = {
@@ -226,7 +264,11 @@ fun SpendingThresholdDialog(
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(if (testAlertSent) "Test Alert Sent! Check Notification Tray" else "Send Test Notification Now")
+                        Text(
+                            if (!areNotificationsEnabled) "Test Alert (Notifications Blocked in Settings)"
+                            else if (testAlertSent) "Test Alert Sent! Check Notification Tray"
+                            else "Send Test Notification Now"
+                        )
                     }
                 }
             }

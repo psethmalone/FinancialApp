@@ -30,6 +30,7 @@ import com.example.financehome.data.repository.NotificationLogRepository
 import com.example.financehome.data.repository.SpendingAlertRepository
 import com.example.financehome.domain.SafeToSpendAlertLevel
 import com.example.financehome.domain.SpendingAlertConfig
+import com.example.financehome.service.FinanceNotificationListenerService
 import com.example.financehome.service.NotificationParser
 import com.example.financehome.service.SpendingAlertManager
 
@@ -45,6 +46,8 @@ class SettingsViewModel @Inject constructor(
 
     val isCloudSyncEnabled = MutableStateFlow(false)
     val hasNotificationPermission = MutableStateFlow(false)
+    val isPostNotificationsGranted = MutableStateFlow(false)
+    val isListenerConnected = FinanceNotificationListenerService.isConnected
     val exportState = MutableStateFlow<String?>(null)
 
     val notificationLogs = notificationLogRepo.logs
@@ -198,6 +201,12 @@ class SettingsViewModel @Inject constructor(
     fun checkNotificationPermission(context: Context) {
         val enabledPackages = NotificationManagerCompat.getEnabledListenerPackages(context)
         hasNotificationPermission.value = enabledPackages.contains(context.packageName)
+        isPostNotificationsGranted.value = NotificationManagerCompat.from(context).areNotificationsEnabled()
+    }
+
+    fun rebindListenerService(context: Context) {
+        FinanceNotificationListenerService.rebindService(context)
+        checkNotificationPermission(context)
     }
 
     fun setCloudSyncEnabled(context: Context, enabled: Boolean) {

@@ -35,6 +35,10 @@ import com.example.financehome.ui.theme.ColorWarning
 import com.example.financehome.ui.transactions.PREDEFINED_CATEGORIES
 import com.example.financehome.ui.transactions.TransactionDetailSheet
 import com.example.financehome.ui.update.UpdateDialog
+import android.content.Intent
+import android.provider.Settings
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.app.NotificationManagerCompat
 import java.text.NumberFormat
 import java.time.Instant
 import java.time.LocalDate
@@ -85,6 +89,15 @@ fun DashboardScreen(
 
     val currencyFormat = NumberFormat.getCurrencyInstance(Locale.US)
     val todayFormatted = LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE, MMM d"))
+
+    val context = LocalContext.current
+    var dismissedNotificationWarning by remember { mutableStateOf(false) }
+    val hasNotificationAccess = remember(dismissedNotificationWarning) {
+        NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+    }
+    val hasPostNotifications = remember(dismissedNotificationWarning) {
+        NotificationManagerCompat.from(context).areNotificationsEnabled()
+    }
 
     Scaffold(
         floatingActionButton = {
@@ -181,6 +194,72 @@ fun DashboardScreen(
                                     Icons.Default.Close,
                                     contentDescription = "Dismiss",
                                     tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Notification Permission Warning Banner
+                if ((!hasNotificationAccess || !hasPostNotifications) && !dismissedNotificationWarning) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Card(
+                        onClick = {
+                            val intent = if (!hasNotificationAccess) {
+                                Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                            } else {
+                                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                    putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                }
+                            }
+                            context.startActivity(intent)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f)
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    Icons.Default.NotificationsOff,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Column {
+                                    Text(
+                                        text = if (!hasNotificationAccess) "Bank Notification Access Disabled" else "App Push Alerts Blocked",
+                                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                    Text(
+                                        text = if (!hasNotificationAccess)
+                                            "Tap to enable in Settings to auto-track bank transactions"
+                                        else
+                                            "Tap to enable in Settings to receive spending alerts",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f)
+                                    )
+                                }
+                            }
+                            IconButton(onClick = { dismissedNotificationWarning = true }) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Dismiss",
+                                    tint = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f),
                                     modifier = Modifier.size(18.dp)
                                 )
                             }

@@ -41,6 +41,19 @@ class NotificationFilterRepository @Inject constructor(
             "com.ally.mobile",
             "com.chase.sig.android",
             "com.fidelity.android",
+            "com.konylabs.capitalone",
+            "com.wf.wellsfargomobile",
+            "com.infonow.bofa",
+            "com.americanexpress.android.acctsvcs.us",
+            "com.discoverfinancial.mobile",
+            "com.citi.citimobile",
+            "com.chime.android",
+            "com.pnc.ecommerce.mobile",
+            "com.tdbank",
+            "com.huntington.m",
+            "com.usaa.mobile.android.usaa",
+            "com.venmo",
+            "com.paypal.android.p2pmobile",
             "com.google.android.apps.messaging",
             "com.samsung.android.messaging",
             "com.android.mms",
@@ -75,6 +88,7 @@ class NotificationFilterRepository @Inject constructor(
             "fidelity",
             "charles schwab",
             "credit union",
+            "chime",
             "bank",
             "card",
             "debit",
@@ -102,6 +116,12 @@ class NotificationFilterRepository @Inject constructor(
             InstalledAppOption("com.infonow.bofa", "Bank of America", isSmsApp = false, isPredefined = true),
             InstalledAppOption("com.americanexpress.android.acctsvcs.us", "American Express", isSmsApp = false, isPredefined = true),
             InstalledAppOption("com.discoverfinancial.mobile", "Discover Mobile", isSmsApp = false, isPredefined = true),
+            InstalledAppOption("com.citi.citimobile", "Citi Mobile", isSmsApp = false, isPredefined = true),
+            InstalledAppOption("com.chime.android", "Chime Banking", isSmsApp = false, isPredefined = true),
+            InstalledAppOption("com.pnc.ecommerce.mobile", "PNC Bank", isSmsApp = false, isPredefined = true),
+            InstalledAppOption("com.tdbank", "TD Bank", isSmsApp = false, isPredefined = true),
+            InstalledAppOption("com.huntington.m", "Huntington Mobile", isSmsApp = false, isPredefined = true),
+            InstalledAppOption("com.usaa.mobile.android.usaa", "USAA Mobile", isSmsApp = false, isPredefined = true),
             InstalledAppOption("com.venmo", "Venmo", isSmsApp = false, isPredefined = true),
             InstalledAppOption("com.paypal.android.p2pmobile", "PayPal", isSmsApp = false, isPredefined = true)
         )
@@ -126,7 +146,21 @@ class NotificationFilterRepository @Inject constructor(
 
     fun isPackageMonitored(packageName: String): Boolean {
         val current = _config.value
-        return current.monitoredPackages.contains(packageName)
+        if (current.monitoredPackages.contains(packageName)) return true
+        if (current.isSmsEnabled && isSmsApp(packageName)) return true
+        if (packageName.contains("cash", ignoreCase = true) ||
+            packageName.contains("ally", ignoreCase = true) ||
+            packageName.contains("chase", ignoreCase = true) ||
+            packageName.contains("fidelity", ignoreCase = true) ||
+            packageName.contains("capitalone", ignoreCase = true) ||
+            packageName.contains("wellsfargo", ignoreCase = true) ||
+            packageName.contains("bofa", ignoreCase = true) ||
+            packageName.contains("discover", ignoreCase = true) ||
+            packageName.contains("chime", ignoreCase = true)
+        ) {
+            return true
+        }
+        return false
     }
 
     fun isSmsApp(packageName: String): Boolean {

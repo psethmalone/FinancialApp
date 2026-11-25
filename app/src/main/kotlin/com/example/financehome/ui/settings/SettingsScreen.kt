@@ -43,6 +43,8 @@ fun SettingsScreen(
 
     val isCloudSyncEnabled by viewModel.isCloudSyncEnabled.collectAsState()
     val hasNotificationPermission by viewModel.hasNotificationPermission.collectAsState()
+    val isPostNotificationsGranted by viewModel.isPostNotificationsGranted.collectAsState()
+    val isListenerConnected by viewModel.isListenerConnected.collectAsState()
     val exportState by viewModel.exportState.collectAsState()
 
     val updateCheckResult by viewModel.updateCheckResult.collectAsState()
@@ -92,48 +94,171 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Real-Time Notification Detection Card
+            // Real-Time Notification Detection & Health Check Card
             item {
+                val overallHealthy = hasNotificationPermission && isPostNotificationsGranted
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = if (hasNotificationPermission) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.errorContainer
+                        containerColor = if (overallHealthy) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                        else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)
                     )
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(18.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "Real-Time Transaction Detection",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = if (hasNotificationPermission) MaterialTheme.colorScheme.onPrimaryContainer
-                                else MaterialTheme.colorScheme.onErrorContainer
-                            )
-                            Icon(
-                                imageVector = if (hasNotificationPermission) Icons.Default.CheckCircle else Icons.Default.Warning,
-                                contentDescription = null,
-                                tint = if (hasNotificationPermission) ColorIncome else ColorExpense
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Icon(
+                                    imageVector = if (overallHealthy) Icons.Default.CheckCircle else Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = if (overallHealthy) ColorIncome else ColorExpense
+                                )
+                                Text(
+                                    text = "Notification Health & Status",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            if (hasNotificationPermission) {
+                                FilledTonalIconButton(
+                                    onClick = { viewModel.rebindListenerService(context) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = "Reconnect Listener", modifier = Modifier.size(16.dp))
+                                }
+                            }
                         }
 
-                        Text(
-                            text = if (hasNotificationPermission)
-                                "Active. FinanceHome is automatically detecting push notifications from Cash App, Ally, and other banks and recording transactions."
-                            else
-                                "Notification Access is not enabled. To automatically log transactions from Cash App and Ally notifications in real-time, please grant notification access in Android Settings.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (hasNotificationPermission) MaterialTheme.colorScheme.onPrimaryContainer
-                            else MaterialTheme.colorScheme.onErrorContainer
-                        )
+                        // Status Item 1: Outgoing Alerts Permission (POST_NOTIFICATIONS)
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Outgoing Push Alerts",
+                                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                                    )
+                                    Text(
+                                        text = if (isPostNotificationsGranted) "✓ Allowed" else "❌ Blocked",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = if (isPostNotificationsGranted) ColorIncome else ColorExpense
+                                    )
+                                }
+                                Text(
+                                    text = if (isPostNotificationsGranted)
+                                        "App can send safe-to-spend notifications, deficit warnings, and receipt reminders."
+                                    else
+                                        "Required on Android 13+ to show threshold alerts and receipts in your notification shade.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (!isPostNotificationsGranted) {
+                                    Button(
+                                        onClick = {
+                                            val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                                putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                            }
+                                            context.startActivity(intent)
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Allow Notifications in Android Settings", fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                        }
+
+                        // Status Item 2: Incoming Notification Access (Listener Service)
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Incoming Bank Detection",
+                                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                                    )
+                                    Text(
+                                        text = if (hasNotificationPermission) {
+                                            if (isListenerConnected) "✓ Connected" else "✓ Granted (Sleeping)"
+                                        } else "❌ Disabled",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = if (hasNotificationPermission) ColorIncome else ColorExpense
+                                    )
+                                }
+                                Text(
+                                    text = if (hasNotificationPermission)
+                                        "FinanceHome automatically reads notifications from Cash App, banks, and text alerts to record transactions."
+                                    else
+                                        "Notification Access is disabled. FinanceHome cannot detect bank purchases or SMS texts until this is enabled.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                if (!hasNotificationPermission) {
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = "💡 Android 13/14+ Tip: If the toggle is grayed out (\"Restricted setting\"):\n1. Open phone Settings > Apps > FinanceHome\n2. Tap the 3 dots (⋮) in the top-right corner\n3. Tap 'Allow restricted settings'\n4. Return here to enable Notification Access.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(10.dp)
+                                        )
+                                    }
+
+                                    Button(
+                                        onClick = {
+                                            val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                                            context.startActivity(intent)
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Grant Notification Access", fontSize = 12.sp)
+                                    }
+                                } else if (!isListenerConnected) {
+                                    OutlinedButton(
+                                        onClick = { viewModel.rebindListenerService(context) },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Reconnect Listener Service", fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                        }
 
                         FilledTonalButton(
                             onClick = { showAppFilterDialog = true },
@@ -154,32 +279,13 @@ fun SettingsScreen(
                             Text("Spending Alerts & Thresholds ($thresholdStr)")
                         }
 
-                        if (!hasNotificationPermission) {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    text = "💡 Android 13/14+ Tip: If the Notification Access toggle is grayed out in phone settings: Go to phone Settings > Apps > FinanceHome > tap the 3 vertical dots (⋮) in the top-right corner > tap 'Allow restricted settings'. Then return here to enable access.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(10.dp)
-                                )
-                            }
-
-                            Button(
-                                onClick = {
-                                    val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-                                    context.startActivity(intent)
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.NotificationsActive, contentDescription = null)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Grant Notification Access")
-                            }
+                        OutlinedButton(
+                            onClick = { viewModel.sendTestSpendingAlert() },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Notifications, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Test Push Notification in System Tray")
                         }
                     }
                 }
