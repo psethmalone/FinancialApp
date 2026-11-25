@@ -4,6 +4,7 @@ import com.example.financehome.data.model.Bill
 import com.example.financehome.data.model.Debt
 import java.text.NumberFormat
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.util.Locale
@@ -663,4 +664,100 @@ object PaycheckCalculator {
         baselineTakeHomePay = takeHomePay,
         periodCount = periodCount
     )
+
+    /**
+     * Finds the next 3-paycheck month (or 5-paycheck month for weekly) starting from [fromDate].
+     * If the current month is an active 3-paycheck month and [fromDate] has not passed its final payday,
+     * returns countdown with isCurrentMonth = true.
+     */
+    fun calculateThreePaycheckCountdown(
+        anchorPayDate: LocalDate,
+        frequency: PayFrequency,
+        fromDate: LocalDate = LocalDate.now()
+    ): ThreePaycheckMonthCountdown? {
+        if (frequency != PayFrequency.BI_WEEKLY && frequency != PayFrequency.WEEKLY) {
+            return null
+        }
+        val targetThreshold = if (frequency == PayFrequency.BI_WEEKLY) 3 else 5
+        val startYearMonth = YearMonth.from(fromDate)
+        val formatter = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)
+
+        for (i in 0..24) {
+            val ym = startYearMonth.plusMonths(i.toLong())
+            val payDays = getPayDatesForMonth(ym.year, ym.monthValue, anchorPayDate, frequency).sorted()
+            if (payDays.size >= targetThreshold) {
+                // If checking the current month
+                if (i == 0) {
+                    val lastPayDate = ym.atDay(payDays.last())
+                    if (!fromDate.isAfter(lastPayDate)) {
+                        val daysRemaining = ChronoUnit.DAYS.between(fromDate, lastPayDate).coerceAtLeast(0)
+                        return ThreePaycheckMonthCountdown(
+                            targetYearMonth = ym,
+                            formattedMonth = ym.format(formatter),
+                            monthsRemaining = 0L,
+                            daysRemaining = daysRemaining,
+                            isCurrentMonth = true,
+                            payDates = payDays
+                        )
+                    }
+                    continue
+                }
+
+                val monthsRemaining = ChronoUnit.MONTHS.between(startYearMonth, ym)
+                val daysRemaining = ChronoUnit.DAYS.between(fromDate, ym.atDay(payDays.first())).coerceAtLeast(0)
+                return ThreePaycheckMonthCountdown(
+                    targetYearMonth = ym,
+                    formattedMonth = ym.format(formatter),
+                    monthsRemaining = monthsRemaining,
+                    daysRemaining = daysRemaining,
+                    isCurrentMonth = false,
+                    payDates = payDays
+                )
+            }
+        }
+        return null
+    }
+
+    /**
+     * Calculates monthly quick glimpse for a specified [year] and [month].
+     * Includes estimated income based on scheduled paychecks count,
+     * total bills, active debt minimums, and projected net surplus.
+     */
+    fun calculateMonthlyGlimpse(
+        year: Int,
+        month: Int,
+        bills: List<Bill>,
+        debts: List<Debt>,
+        config: PaycheckConfig,
+        anchorPayDate: LocalDate,
+        currentTakeHomePay: Double = config.typicalTakeHomePay
+    ): MonthlyGlimpse {
+        val payDays = getPayDatesForMonth(year, month, anchorPayDate, config.frequency)
+        val isCurrentMonth = LocalDate.now().year == year && LocalDate.now().monthValue == month
+        val estimatedIncome = if (isCurrentMonth) {
+            if (payDays.isNotEmpty()) {
+                currentTakeHomePay + (payDays.size - 1) * config.typicalTakeHomePay
+            } else {
+                0.0
+            }
+        } else {
+            payDays.size * config.typicalTakeHomePay
+        }
+
+        val totalBills = bills.sumOf { it.amount }
+        val totalDebts = debts.filter { it.currentBalance > 0.0 }.sumOf { it.minimumPayment }
+        val totalObligations = totalBills + totalDebts
+        val netSurplus = estimatedIncome - totalObligations
+
+        return MonthlyGlimpse(
+            year = year,
+            month = month,
+            payDaysCount = payDays.size,
+            estimatedIncome = estimatedIncome,
+            totalBills = totalBills,
+            totalDebts = totalDebts,
+            totalObligations = totalObligations,
+            netSurplus = netSurplus
+        )
+    }
 }

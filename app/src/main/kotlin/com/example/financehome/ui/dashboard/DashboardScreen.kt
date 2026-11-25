@@ -61,7 +61,7 @@ fun DashboardScreen(
     onNavigateToDebts: () -> Unit,
     onNavigateToSwipeCategorize: () -> Unit,
     onNavigateToTransactions: () -> Unit = {},
-    onNavigateToCashFlow: () -> Unit = {},
+    onNavigateToCashFlow: (openTransactionsTab: Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var selectedDashboardTab by remember { mutableStateOf(DashboardTab.OVERVIEW) }
@@ -317,7 +317,7 @@ fun DashboardScreen(
                             SafeToSpendGaugeCard(
                                 status = safeToSpendStatus,
                                 currencyFormat = currencyFormat,
-                                onNavigateToCashFlow = onNavigateToCashFlow,
+                                onNavigateToCashFlow = { onNavigateToCashFlow(false) },
                                 onConfigureThreshold = { showSpendingThresholdDialog = true }
                             )
                         }
@@ -677,136 +677,51 @@ fun DashboardScreen(
                             }
                         }
 
-                        // Full Searchable Transactions & Activity Section
+                        // Recent Activity Preview (Executive Financial Outlook)
                         item {
-                            Row(
+                            Card(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                )
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    Text(
-                                        text = "Transactions & Activity",
-                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                                    )
-                                    if (filteredTransactions.isNotEmpty()) {
-                                        Surface(
-                                            shape = RoundedCornerShape(8.dp),
-                                            color = MaterialTheme.colorScheme.primaryContainer
-                                        ) {
-                                            Text(
-                                                text = "${filteredTransactions.size}",
-                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Recent Activity",
+                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                        )
+                                        TextButton(onClick = { onNavigateToCashFlow(true) }) {
+                                            Text("View All in Cash Flow →")
+                                        }
+                                    }
+
+                                    if (recentTransactions.isEmpty()) {
+                                        Text(
+                                            text = "No recent transactions yet.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.outline
+                                        )
+                                    } else {
+                                        recentTransactions.take(3).forEach { transaction ->
+                                            TransactionItemRow(
+                                                transaction = transaction,
+                                                currencyFormat = currencyFormat,
+                                                modifier = Modifier.clickable { selectedTransactionForDetail = transaction }
                                             )
                                         }
                                     }
                                 }
-                                if (selectedCategory != null || searchQuery.isNotEmpty()) {
-                                    TextButton(onClick = {
-                                        viewModel.onSearchQueryChange("")
-                                        viewModel.onCategorySelect(null)
-                                    }) {
-                                        Text("Clear Filters")
-                                    }
-                                }
-                            }
-                        }
-
-                        // Search Input
-                        item {
-                            OutlinedTextField(
-                                value = searchQuery,
-                                onValueChange = { viewModel.onSearchQueryChange(it) },
-                                placeholder = { Text("Search by merchant, category, notes...") },
-                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                                trailingIcon = {
-                                    if (searchQuery.isNotEmpty()) {
-                                        IconButton(onClick = { viewModel.onSearchQueryChange("") }) {
-                                            Icon(Icons.Default.Clear, contentDescription = "Clear search")
-                                        }
-                                    }
-                                },
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-
-                        // Category Filter Chips
-                        item {
-                            LazyRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                item {
-                                    FilterChip(
-                                        selected = selectedCategory == null,
-                                        onClick = { viewModel.onCategorySelect(null) },
-                                        label = { Text("All") }
-                                    )
-                                }
-                                items(PREDEFINED_CATEGORIES) { cat ->
-                                    FilterChip(
-                                        selected = selectedCategory == cat,
-                                        onClick = { viewModel.onCategorySelect(cat) },
-                                        label = { Text(cat) }
-                                    )
-                                }
-                            }
-                        }
-
-                        // Filtered Transactions List
-                        if (filteredTransactions.isEmpty()) {
-                            item {
-                                Card(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                                    )
-                                ) {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(24.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally
-                                    ) {
-                                        Icon(
-                                            Icons.Default.SearchOff,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(36.dp)
-                                        )
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Text(
-                                            text = if (searchQuery.isNotBlank() || selectedCategory != null)
-                                                "No matching transactions found"
-                                            else "No transactions detected yet",
-                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
-                                        )
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Text(
-                                            text = if (searchQuery.isNotBlank() || selectedCategory != null)
-                                                "Try adjusting your search terms or category filter."
-                                            else "Transactions will appear here automatically when notifications arrive or when you add them manually.",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                                        )
-                                    }
-                                }
-                            }
-                        } else {
-                            items(filteredTransactions, key = { it.id }) { transaction ->
-                                TransactionItemRow(
-                                    transaction = transaction,
-                                    currencyFormat = currencyFormat,
-                                    modifier = Modifier.clickable { selectedTransactionForDetail = transaction }
-                                )
                             }
                         }
 

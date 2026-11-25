@@ -419,5 +419,66 @@ class PaycheckCalculatorTest {
         assertEquals(-350.0, p3.safeToSpend, 0.01)
         assertTrue(p3.deficitNote!!.contains("remaining deficit"))
     }
+
+    @Test
+    fun testCalculateThreePaycheckCountdown() {
+        val anchor = LocalDate.of(2026, 11, 13)
+        val today = LocalDate.of(2026, 11, 1)
+        val countdown = PaycheckCalculator.calculateThreePaycheckCountdown(
+            anchorPayDate = anchor,
+            frequency = PayFrequency.BI_WEEKLY,
+            fromDate = today
+        )
+
+        assertNotNull(countdown)
+        assertEquals(java.time.YearMonth.of(2027, 4), countdown!!.targetYearMonth)
+        assertEquals("April 2027", countdown.formattedMonth)
+        assertEquals(5L, countdown.monthsRemaining)
+        assertFalse(countdown.isCurrentMonth)
+        assertEquals(listOf(2, 16, 30), countdown.payDates)
+
+        val insideDate = LocalDate.of(2027, 4, 5)
+        val activeCountdown = PaycheckCalculator.calculateThreePaycheckCountdown(
+            anchorPayDate = anchor,
+            frequency = PayFrequency.BI_WEEKLY,
+            fromDate = insideDate
+        )
+        assertNotNull(activeCountdown)
+        assertTrue(activeCountdown!!.isCurrentMonth)
+        assertEquals(0L, activeCountdown.monthsRemaining)
+        assertEquals(25L, activeCountdown.daysRemaining)
+    }
+
+    @Test
+    fun testCalculateMonthlyGlimpse() {
+        val bills = listOf(
+            Bill("b1", "Rent", 1000.0, 1, "Housing"),
+            Bill("b2", "Electric", 150.0, 15, "Utilities")
+        )
+        val debts = listOf(
+            Debt("d1", "Card", 2000.0, 1500.0, 0.20, 100.0, DebtType.CREDIT_CARD, 0L, dueDayOfMonth = 10)
+        )
+        val config = PaycheckConfig(
+            frequency = PayFrequency.BI_WEEKLY,
+            typicalTakeHomePay = 2000.0,
+            anchorPayDateEpochDay = LocalDate.of(2026, 11, 13).toEpochDay()
+        )
+
+        val glimpseApril = PaycheckCalculator.calculateMonthlyGlimpse(
+            year = 2027,
+            month = 4,
+            bills = bills,
+            debts = debts,
+            config = config,
+            anchorPayDate = LocalDate.of(2026, 11, 13)
+        )
+
+        assertEquals(3, glimpseApril.payDaysCount)
+        assertEquals(6000.0, glimpseApril.estimatedIncome, 0.01)
+        assertEquals(1150.0, glimpseApril.totalBills, 0.01)
+        assertEquals(100.0, glimpseApril.totalDebts, 0.01)
+        assertEquals(1250.0, glimpseApril.totalObligations, 0.01)
+        assertEquals(4750.0, glimpseApril.netSurplus, 0.01)
+    }
 }
 

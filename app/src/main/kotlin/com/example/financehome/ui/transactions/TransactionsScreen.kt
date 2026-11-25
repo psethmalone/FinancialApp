@@ -100,160 +100,199 @@ fun TransactionsScreen(
         },
         modifier = modifier
     ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-            // Search Input
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { viewModel.onSearchQueryChange(it) },
-                placeholder = { Text("Search by merchant or category...") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { viewModel.onSearchQueryChange("") }) {
-                            Icon(Icons.Default.Clear, contentDescription = "Clear search")
-                        }
-                    }
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            )
+        TransactionsContent(
+            viewModel = viewModel,
+            onTransactionClick = { selectedTransactionForEdit = it },
+            modifier = Modifier.padding(innerPadding)
+        )
+    }
 
-            // Category Filter Chips
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                item {
-                    FilterChip(
-                        selected = selectedCategory == null,
-                        onClick = { viewModel.onCategorySelect(null) },
-                        label = { Text("All") }
-                    )
+    TransactionDetailSheetHost(
+        transaction = selectedTransactionForEdit,
+        viewModel = viewModel,
+        onDismiss = { selectedTransactionForEdit = null },
+        onTransactionUpdated = { selectedTransactionForEdit = it }
+    )
+}
+
+@Composable
+fun TransactionsContent(
+    viewModel: TransactionsViewModel,
+    onTransactionClick: (Transaction) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val searchQuery by viewModel.searchQuery.collectAsState()
+    val selectedCategory by viewModel.selectedCategory.collectAsState()
+    val transactions by viewModel.filteredTransactions.collectAsState()
+    val currencyFormat = NumberFormat.getCurrencyInstance(Locale.US)
+
+    Column(
+        modifier = modifier.fillMaxSize()
+    ) {
+        // Search Input
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { viewModel.onSearchQueryChange(it) },
+            placeholder = { Text("Search by merchant or category...") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            trailingIcon = {
+                if (searchQuery.isNotEmpty()) {
+                    IconButton(onClick = { viewModel.onSearchQueryChange("") }) {
+                        Icon(Icons.Default.Clear, contentDescription = "Clear search")
+                    }
                 }
-                items(PREDEFINED_CATEGORIES) { cat ->
-                    FilterChip(
-                        selected = selectedCategory == cat,
-                        onClick = { viewModel.onCategorySelect(cat) },
-                        label = { Text(cat) }
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+
+        // Category Filter Chips
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            item {
+                FilterChip(
+                    selected = selectedCategory == null,
+                    onClick = { viewModel.onCategorySelect(null) },
+                    label = { Text("All") }
+                )
+            }
+            items(PREDEFINED_CATEGORIES) { cat ->
+                FilterChip(
+                    selected = selectedCategory == cat,
+                    onClick = { viewModel.onCategorySelect(cat) },
+                    label = { Text(cat) }
+                )
+            }
+        }
+
+        // Transactions List
+        if (transactions.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        Icons.Default.ReceiptLong,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.size(64.dp)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = if (searchQuery.isNotEmpty() || selectedCategory != null)
+                            "No transactions match your filter"
+                        else "No transactions recorded yet",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
-
-            // Transactions List
-            if (transactions.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(32.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            Icons.Default.ReceiptLong,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.outline,
-                            modifier = Modifier.size(64.dp)
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = if (searchQuery.isNotEmpty() || selectedCategory != null)
-                                "No transactions match your filter"
-                            else "No transactions recorded yet",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 80.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(transactions, key = { it.id }) { transaction ->
-                        TransactionRowItem(
-                            transaction = transaction,
-                            currencyFormat = currencyFormat,
-                            onClick = { selectedTransactionForEdit = transaction }
-                        )
-                    }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 80.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(transactions, key = { it.id }) { transaction ->
+                    TransactionRowItem(
+                        transaction = transaction,
+                        currencyFormat = currencyFormat,
+                        onClick = { onTransactionClick(transaction) }
+                    )
                 }
             }
         }
     }
+}
 
-    // Edit Transaction Bottom Sheet
-    selectedTransactionForEdit?.let { transaction ->
-        val receiptItems by viewModel.getReceiptItems(transaction.id).collectAsState(initial = emptyList<ReceiptItem>())
-        val isScanning by viewModel.isScanningReceipt.collectAsState()
+@Composable
+fun TransactionDetailSheetHost(
+    transaction: Transaction?,
+    viewModel: TransactionsViewModel,
+    onDismiss: () -> Unit,
+    onTransactionUpdated: (Transaction?) -> Unit
+) {
+    if (transaction == null) return
 
-        TransactionDetailSheet(
-            transaction = transaction,
-            receiptItems = receiptItems,
-            isScanning = isScanning,
-            currencyFormat = currencyFormat,
-            bills = bills,
-            debts = debts,
-            onDismiss = { selectedTransactionForEdit = null },
-            onUpdateCategory = { newCategory ->
-                viewModel.updateTransactionCategory(transaction, newCategory)
-                selectedTransactionForEdit = null
-            },
-            onToggleDiscretionary = { isDiscretionary ->
-                viewModel.toggleDiscretionary(transaction, isDiscretionary)
-                selectedTransactionForEdit = selectedTransactionForEdit?.copy(isDiscretionary = isDiscretionary)
-            },
-            onDelete = {
-                viewModel.deleteTransaction(transaction)
-                selectedTransactionForEdit = null
-            },
-            onCreateCaptureUri = { viewModel.createReceiptCaptureFile() },
-            onSavePickedUri = { uri -> viewModel.savePickedImageToInternalStorage(uri) },
-            onAttachReceipt = { uriStr -> viewModel.attachReceipt(transaction.id, uriStr) },
-            onAddItem = { item -> viewModel.addReceiptItem(item) },
-            onUpdateItem = { item -> viewModel.updateReceiptItem(item) },
-            onDeleteItem = { item -> viewModel.deleteReceiptItem(item) },
-            onRemoveReceipt = { viewModel.removeReceipt(transaction.id) },
-            onToggleNoReceipt = {
-                val newNoReceipt = !transaction.noReceiptNeeded
-                viewModel.markNoReceiptNeeded(transaction.id, newNoReceipt)
-                selectedTransactionForEdit = transaction.copy(noReceiptNeeded = newNoReceipt)
-            },
-            onLinkToBill = { billId ->
-                viewModel.linkTransactionToBill(transaction.id, billId)
-                selectedTransactionForEdit = transaction.copy(
+    val currencyFormat = NumberFormat.getCurrencyInstance(Locale.US)
+    val bills by viewModel.bills.collectAsState()
+    val debts by viewModel.debts.collectAsState()
+    val receiptItems by viewModel.getReceiptItems(transaction.id).collectAsState(initial = emptyList<ReceiptItem>())
+    val isScanning by viewModel.isScanningReceipt.collectAsState()
+
+    TransactionDetailSheet(
+        transaction = transaction,
+        receiptItems = receiptItems,
+        isScanning = isScanning,
+        currencyFormat = currencyFormat,
+        bills = bills,
+        debts = debts,
+        onDismiss = onDismiss,
+        onUpdateCategory = { newCategory ->
+            viewModel.updateTransactionCategory(transaction, newCategory)
+            onDismiss()
+        },
+        onToggleDiscretionary = { isDiscretionary ->
+            viewModel.toggleDiscretionary(transaction, isDiscretionary)
+            onTransactionUpdated(transaction.copy(isDiscretionary = isDiscretionary))
+        },
+        onDelete = {
+            viewModel.deleteTransaction(transaction)
+            onDismiss()
+        },
+        onCreateCaptureUri = { viewModel.createReceiptCaptureFile() },
+        onSavePickedUri = { uri -> viewModel.savePickedImageToInternalStorage(uri) },
+        onAttachReceipt = { uriStr -> viewModel.attachReceipt(transaction.id, uriStr) },
+        onAddItem = { item -> viewModel.addReceiptItem(item) },
+        onUpdateItem = { item -> viewModel.updateReceiptItem(item) },
+        onDeleteItem = { item -> viewModel.deleteReceiptItem(item) },
+        onRemoveReceipt = { viewModel.removeReceipt(transaction.id) },
+        onToggleNoReceipt = {
+            val newNoReceipt = !transaction.noReceiptNeeded
+            viewModel.markNoReceiptNeeded(transaction.id, newNoReceipt)
+            onTransactionUpdated(transaction.copy(noReceiptNeeded = newNoReceipt))
+        },
+        onLinkToBill = { billId ->
+            viewModel.linkTransactionToBill(transaction.id, billId)
+            onTransactionUpdated(
+                transaction.copy(
                     linkedBillId = billId,
                     linkedDebtId = null,
                     isDiscretionary = false,
                     noReceiptNeeded = true
                 )
-            },
-            onLinkToDebt = { debtId, amount ->
-                viewModel.linkTransactionToDebt(transaction.id, debtId, amount)
-                selectedTransactionForEdit = transaction.copy(
+            )
+        },
+        onLinkToDebt = { debtId, amount ->
+            viewModel.linkTransactionToDebt(transaction.id, debtId, amount)
+            onTransactionUpdated(
+                transaction.copy(
                     linkedDebtId = debtId,
                     linkedBillId = null,
                     isDiscretionary = false,
                     noReceiptNeeded = true
                 )
-            },
-            onUnlinkObligation = {
-                viewModel.unlinkTransactionObligation(transaction.id)
-                selectedTransactionForEdit = transaction.copy(
+            )
+        },
+        onUnlinkObligation = {
+            viewModel.unlinkTransactionObligation(transaction.id)
+            onTransactionUpdated(
+                transaction.copy(
                     linkedBillId = null,
                     linkedDebtId = null
                 )
-            }
-        )
-    }
+            )
+        }
+    )
 }
 
 @Composable

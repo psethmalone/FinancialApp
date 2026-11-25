@@ -23,6 +23,7 @@ import com.example.financehome.data.model.Debt
 import com.example.financehome.data.model.ReceiptItem
 import com.example.financehome.data.model.Transaction
 import com.example.financehome.ui.cashflow.CashFlowScreen
+import com.example.financehome.ui.cashflow.CashFlowScreenTab
 import com.example.financehome.ui.categorize.SwipeCategorizeScreen
 import com.example.financehome.ui.categorize.SwipeCategorizeViewModel
 import com.example.financehome.ui.csvimport.CsvImportScreen
@@ -67,6 +68,7 @@ fun AppNavigation(
     var showCsvImportScreen by remember { mutableStateOf(false) }
     var showSwipeCategorizeScreen by remember { mutableStateOf(false) }
     var showManageRulesScreen by remember { mutableStateOf(false) }
+    var initialCashFlowTab by remember { mutableStateOf(CashFlowScreenTab.CASH_FLOW) }
 
     // Shared ViewModels (scoped to Activity lifecycle)
     val dashboardViewModel: DashboardViewModel = viewModel()
@@ -189,10 +191,16 @@ fun AppNavigation(
                                 onNavigateToAddTransaction = { showAddTransactionScreen = true },
                                 onNavigateToDebts = { selectedTab = MainTab.DEBTS },
                                 onNavigateToSwipeCategorize = { showSwipeCategorizeScreen = true },
-                                onNavigateToCashFlow = { selectedTab = MainTab.CASH_FLOW }
+                                onNavigateToCashFlow = { openTransactionsTab ->
+                                    initialCashFlowTab = if (openTransactionsTab) CashFlowScreenTab.TRANSACTIONS else CashFlowScreenTab.CASH_FLOW
+                                    selectedTab = MainTab.CASH_FLOW
+                                }
                             )
                             MainTab.CASH_FLOW -> CashFlowScreen(
-                                viewModel = debtsViewModel
+                                viewModel = debtsViewModel,
+                                transactionsViewModel = transactionsViewModel,
+                                onNavigateToAddTransaction = { showAddTransactionScreen = true },
+                                initialTab = initialCashFlowTab
                             )
                             MainTab.DEBTS -> DebtsScreen(
                                 viewModel = debtsViewModel,

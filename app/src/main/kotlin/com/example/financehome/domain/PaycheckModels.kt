@@ -3,6 +3,27 @@ package com.example.financehome.domain
 import com.example.financehome.data.model.Bill
 import com.example.financehome.data.model.Debt
 import java.time.LocalDate
+import java.time.YearMonth
+
+data class ThreePaycheckMonthCountdown(
+    val targetYearMonth: YearMonth,
+    val formattedMonth: String,
+    val monthsRemaining: Long,
+    val daysRemaining: Long,
+    val isCurrentMonth: Boolean,
+    val payDates: List<Int>
+)
+
+data class MonthlyGlimpse(
+    val year: Int,
+    val month: Int,
+    val payDaysCount: Int,
+    val estimatedIncome: Double,
+    val totalBills: Double,
+    val totalDebts: Double,
+    val totalObligations: Double,
+    val netSurplus: Double
+)
 
 enum class PayFrequency(
     val paychecksPerYear: Double,
