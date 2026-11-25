@@ -483,14 +483,21 @@ fun TransactionDetailSheet(
             ) {
                 Text(
                     text = transaction.merchant,
-                    style = MaterialTheme.typography.titleMedium
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                    modifier = Modifier.weight(1f, fill = false),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
+                Spacer(modifier = Modifier.width(12.dp))
                 Text(
-                    text = currencyFormat.format(transaction.amount),
+                    text = (if (transaction.type == TransactionType.DEBIT) "-" else "+") + currencyFormat.format(transaction.amount),
                     style = MaterialTheme.typography.titleLarge.copy(
                         fontWeight = FontWeight.Bold,
                         color = if (transaction.type == TransactionType.DEBIT) ColorExpense else ColorIncome
-                    )
+                    ),
+                    maxLines = 1,
+                    softWrap = false,
+                    textAlign = TextAlign.End
                 )
             }
 
@@ -1266,11 +1273,13 @@ fun ReceiptItemRow(
                     text = item.category.emoji,
                     fontSize = 20.sp
                 )
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = item.name,
                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1290,16 +1299,22 @@ fun ReceiptItemRow(
                             Text(
                                 text = "${item.quantity} @ ${currencyFormat.format(item.unitPrice)}/ea",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }
                 }
             }
+            Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = currencyFormat.format(item.price),
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                softWrap = false,
+                textAlign = TextAlign.End
             )
         }
     }

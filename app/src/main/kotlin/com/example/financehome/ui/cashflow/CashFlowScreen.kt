@@ -1,5 +1,7 @@
 package com.example.financehome.ui.cashflow
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -18,6 +20,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.financehome.data.model.Bill
@@ -1028,6 +1031,7 @@ fun CashFlowPaycheckPlannerCard(
 ) {
     val dtf = DateTimeFormatter.ofPattern("EEE, MMM d", Locale.US)
     val nextPayDateStr = breakdown.followingPayDate.format(dtf)
+    var selectedPeriodIndex by remember { mutableStateOf<Int?>(null) }
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -1191,20 +1195,33 @@ fun CashFlowPaycheckPlannerCard(
 
             // Forward Paycheck Schedule Projection (Decoupled: Period 1 = Current Hours, Periods 2+ = Baseline)
             if (breakdown.upcomingPayPeriods.size > 1) {
-                Text(
-                    text = "Forward Paycheck Schedule (Next 3 Paydays):",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Forward Paycheck Schedule (Next 3 Paydays):",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                    )
+                    Text(
+                        text = "Tap any paycheck box to see the exact bills and debts it covers.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     breakdown.upcomingPayPeriods.forEach { period ->
+                        val isSelected = selectedPeriodIndex == period.periodIndex
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             color = if (period.isCurrentPeriod) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
                             else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            modifier = Modifier.weight(1f)
+                            border = if (isSelected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    selectedPeriodIndex = if (selectedPeriodIndex == period.periodIndex) null else period.periodIndex
+                                }
                         ) {
                             Column(modifier = Modifier.padding(10.dp)) {
                                 Text(
@@ -1265,6 +1282,194 @@ fun CashFlowPaycheckPlannerCard(
                                         maxLines = 2,
                                         softWrap = true
                                     )
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    Text(
+                                        text = if (isSelected) "Hide bills" else "${period.obligations.size} bill${if (period.obligations.size == 1) "" else "s"}",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        ),
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                    Icon(
+                                        imageVector = if (isSelected) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                        contentDescription = null,
+                                        tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Expandable drop-down of the bills covered by the selected paycheck
+                val activePeriod = breakdown.upcomingPayPeriods.find { it.periodIndex == selectedPeriodIndex }
+                AnimatedVisibility(visible = activePeriod != null) {
+                    if (activePeriod != null) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = if (activePeriod.isCurrentPeriod) "Pay #1 (Upcoming) Obligations" else "Pay #${activePeriod.periodIndex} Obligations",
+                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = "Due window: ${activePeriod.payDate.format(dtf)} to ${activePeriod.nextPayDate.format(dtf)}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Text(
+                                        text = "${currencyFormat.format(activePeriod.totalObligations)} total",
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
+                                        color = ColorExpense,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                                if (activePeriod.obligations.isEmpty()) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.padding(vertical = 4.dp)
+                                    ) {
+                                        Text("🎉", fontSize = 16.sp)
+                                        Text(
+                                            text = "No bills or debts due in this pay window! All take-home pay is safe to spend.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                } else {
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        activePeriod.obligations.forEach { item ->
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .clickable {
+                                                        if (activePeriod.isCurrentPeriod) {
+                                                            onToggleObligationPaid(item)
+                                                        }
+                                                    }
+                                                    .padding(vertical = 4.dp, horizontal = 2.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                    modifier = Modifier.weight(1f)
+                                                ) {
+                                                    Text(
+                                                        text = if (item.type == ObligationType.BILL) "📄" else "💳",
+                                                        fontSize = 16.sp
+                                                    )
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Row(
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                        ) {
+                                                            Text(
+                                                                text = item.name,
+                                                                style = MaterialTheme.typography.bodyMedium.copy(
+                                                                    fontWeight = FontWeight.SemiBold,
+                                                                    textDecoration = if (item.isPaid) TextDecoration.LineThrough else null
+                                                                ),
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis
+                                                            )
+                                                            Surface(
+                                                                shape = RoundedCornerShape(4.dp),
+                                                                color = if (item.type == ObligationType.BILL) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                                                                else MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
+                                                            ) {
+                                                                Text(
+                                                                    text = if (item.type == ObligationType.BILL) "BILL" else "DEBT",
+                                                                    style = MaterialTheme.typography.labelSmall.copy(
+                                                                        fontWeight = FontWeight.Bold,
+                                                                        fontSize = 9.sp
+                                                                    ),
+                                                                    color = if (item.type == ObligationType.BILL) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+                                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                                )
+                                                            }
+                                                        }
+                                                        Text(
+                                                            text = "Due ${item.dueDate.format(dtf)}" + if (item.subtitle.isNotBlank()) " • ${item.subtitle}" else "",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                    }
+                                                }
+
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    if (item.isPaid) {
+                                                        Surface(
+                                                            shape = RoundedCornerShape(4.dp),
+                                                            color = ColorIncome.copy(alpha = 0.15f)
+                                                        ) {
+                                                            Text(
+                                                                text = "PAID",
+                                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                                    fontWeight = FontWeight.Bold,
+                                                                    fontSize = 9.sp
+                                                                ),
+                                                                color = ColorIncome,
+                                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                    Text(
+                                                        text = currencyFormat.format(item.amount),
+                                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = if (item.isPaid) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
+                                                        ),
+                                                        maxLines = 1,
+                                                        softWrap = false,
+                                                        textAlign = TextAlign.End
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
