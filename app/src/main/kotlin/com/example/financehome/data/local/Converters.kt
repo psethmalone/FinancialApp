@@ -68,4 +68,19 @@ class Converters {
         } catch (_: Exception) {
             com.example.financehome.data.model.ReceiptItemCategory.OTHER
         }
+
+    // ── BillRecurrence ───────────────────────────────────────────────────────
+
+    @TypeConverter
+    fun fromBillRecurrence(value: com.example.financehome.data.model.BillRecurrence?): String =
+        (value ?: com.example.financehome.data.model.BillRecurrence.MONTHLY).name
+
+    @TypeConverter
+    fun toBillRecurrence(value: String?): com.example.financehome.data.model.BillRecurrence =
+        try {
+            if (value != null) com.example.financehome.data.model.BillRecurrence.valueOf(value)
+            else com.example.financehome.data.model.BillRecurrence.MONTHLY
+        } catch (_: Exception) {
+            com.example.financehome.data.model.BillRecurrence.MONTHLY
+        }
 }

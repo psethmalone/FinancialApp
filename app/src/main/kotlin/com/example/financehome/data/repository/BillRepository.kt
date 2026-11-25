@@ -60,15 +60,55 @@ class BillRepository @Inject constructor(
 
     suspend fun deleteBill(bill: Bill) = billDao.deleteBill(bill)
 
-    suspend fun toggleBillPaid(bill: Bill) {
-        val newPaid = !bill.isPaidThisMonth
-        val timestamp = if (newPaid) System.currentTimeMillis() else null
-        billDao.markPaid(bill.id, newPaid, timestamp)
+    suspend fun toggleBillPaid(bill: Bill, currentDate: LocalDate = LocalDate.now()) {
+        val thisMonthDue = try {
+            currentDate.withDayOfMonth(minOf(bill.dueDayOfMonth, currentDate.lengthOfMonth()))
+        } catch (_: Exception) {
+            currentDate
+        }
+        val isSettledForThisCycle = bill.isPaidForDate(thisMonthDue, currentDate)
+
+        if (isSettledForThisCycle) {
+            unmarkBillPaid(bill, currentDate)
+        } else {
+            markBillPaidForCycle(bill, currentDate)
+        }
     }
 
-    suspend fun markBillPaid(billId: String, isPaid: Boolean = true) {
-        val timestamp = if (isPaid) System.currentTimeMillis() else null
-        billDao.markPaid(billId, isPaid, timestamp)
+    suspend fun markBillPaidForCycle(bill: Bill, currentDate: LocalDate = LocalDate.now()) {
+        val currentDue = bill.getEffectiveNextDueDate(currentDate)
+        val nextDue = bill.advanceDueDate(currentDue)
+        val timestamp = System.currentTimeMillis()
+        val isCurrentMonth = currentDue.year == currentDate.year && currentDue.monthValue == currentDate.monthValue
+        billDao.updateSettlement(
+            id = bill.id,
+            nextDueDateEpochDay = nextDue.toEpochDay(),
+            lastSettledDateEpochDay = currentDue.toEpochDay(),
+            isPaid = isCurrentMonth,
+            timestamp = timestamp
+        )
+    }
+
+    suspend fun unmarkBillPaid(bill: Bill, currentDate: LocalDate = LocalDate.now()) {
+        val currentNext = bill.getEffectiveNextDueDate(currentDate)
+        val restoredDue = bill.lastSettledDateEpochDay?.let { LocalDate.ofEpochDay(it) }
+            ?: bill.rollbackDueDate(currentNext)
+        billDao.updateSettlement(
+            id = bill.id,
+            nextDueDateEpochDay = restoredDue.toEpochDay(),
+            lastSettledDateEpochDay = null,
+            isPaid = false,
+            timestamp = null
+        )
+    }
+
+    suspend fun markBillPaid(billId: String, isPaid: Boolean = true, currentDate: LocalDate = LocalDate.now()) {
+        val bill = billDao.getBillById(billId) ?: return
+        if (isPaid) {
+            markBillPaidForCycle(bill, currentDate)
+        } else {
+            unmarkBillPaid(bill, currentDate)
+        }
     }
 
     fun updatePaycheckConfig(config: PaycheckConfig) {

@@ -480,5 +480,99 @@ class PaycheckCalculatorTest {
         assertEquals(1250.0, glimpseApril.totalObligations, 0.01)
         assertEquals(4750.0, glimpseApril.netSurplus, 0.01)
     }
+
+    @Test
+    fun testSingleCycleBillSettlement() {
+        val initialDue = LocalDate.of(2026, 12, 1)
+        val bill = Bill(
+            id = "b1",
+            name = "Rent",
+            amount = 1200.0,
+            dueDayOfMonth = 1,
+            category = "Housing",
+            recurrence = com.example.financehome.data.model.BillRecurrence.MONTHLY,
+            nextDueDateEpochDay = initialDue.toEpochDay()
+        )
+
+        val decStart = LocalDate.of(2026, 12, 1)
+        val janStart = LocalDate.of(2027, 1, 1)
+        val febStart = LocalDate.of(2027, 2, 1)
+        val marStart = LocalDate.of(2027, 3, 1)
+
+        // 1. Initial State: All cycles are unpaid
+        val decUnpaidInitial = PaycheckCalculator.calculateUpcomingUnpaidLiabilities(listOf(bill), emptyList(), decStart, janStart)
+        val janUnpaidInitial = PaycheckCalculator.calculateUpcomingUnpaidLiabilities(listOf(bill), emptyList(), janStart, febStart)
+        val febUnpaidInitial = PaycheckCalculator.calculateUpcomingUnpaidLiabilities(listOf(bill), emptyList(), febStart, marStart)
+        val threeMonthTotalInitial = PaycheckCalculator.calculateUpcomingUnpaidLiabilities(listOf(bill), emptyList(), decStart, marStart)
+
+        assertEquals(1200.0, decUnpaidInitial, 0.01)
+        assertEquals(1200.0, janUnpaidInitial, 0.01)
+        assertEquals(1200.0, febUnpaidInitial, 0.01)
+        assertEquals(3600.0, threeMonthTotalInitial, 0.01)
+
+        // 2. Mark Single Cycle Paid: Dec 1 settled, nextDueDate advances to Jan 1 (+1 month)
+        val currentDue = bill.getEffectiveNextDueDate(decStart)
+        val nextDue = bill.advanceDueDate(currentDue)
+        assertEquals(LocalDate.of(2027, 1, 1), nextDue)
+
+        val paidBill = bill.copy(
+            nextDueDateEpochDay = nextDue.toEpochDay(),
+            lastSettledDateEpochDay = currentDue.toEpochDay(),
+            isPaidThisMonth = true
+        )
+
+        // Verify: Dec 1 cycle removed from upcoming unpaid liabilities
+        val decUnpaidAfter = PaycheckCalculator.calculateUpcomingUnpaidLiabilities(listOf(paidBill), emptyList(), decStart, janStart)
+        assertEquals(0.0, decUnpaidAfter, 0.01)
+
+        // Verify: Month +1 (Jan) and Month +2 (Feb) remain projected as unpaid outflows
+        val janUnpaidAfter = PaycheckCalculator.calculateUpcomingUnpaidLiabilities(listOf(paidBill), emptyList(), janStart, febStart)
+        val febUnpaidAfter = PaycheckCalculator.calculateUpcomingUnpaidLiabilities(listOf(paidBill), emptyList(), febStart, marStart)
+        assertEquals(1200.0, janUnpaidAfter, 0.01)
+        assertEquals(1200.0, febUnpaidAfter, 0.01)
+
+        val threeMonthTotalAfter = PaycheckCalculator.calculateUpcomingUnpaidLiabilities(listOf(paidBill), emptyList(), decStart, marStart)
+        assertEquals(2400.0, threeMonthTotalAfter, 0.01)
+
+        // 3. Rollback / Unmark Paid: restores prior nextDueDate (Dec 1)
+        val restoredDue = LocalDate.ofEpochDay(paidBill.lastSettledDateEpochDay!!)
+        assertEquals(LocalDate.of(2026, 12, 1), restoredDue)
+
+        val unmarkBill = paidBill.copy(
+            nextDueDateEpochDay = restoredDue.toEpochDay(),
+            lastSettledDateEpochDay = null,
+            isPaidThisMonth = false
+        )
+
+        val decUnpaidRolledBack = PaycheckCalculator.calculateUpcomingUnpaidLiabilities(listOf(unmarkBill), emptyList(), decStart, janStart)
+        val threeMonthTotalRolledBack = PaycheckCalculator.calculateUpcomingUnpaidLiabilities(listOf(unmarkBill), emptyList(), decStart, marStart)
+        assertEquals(1200.0, decUnpaidRolledBack, 0.01)
+        assertEquals(3600.0, threeMonthTotalRolledBack, 0.01)
+    }
+
+    @Test
+    fun testBiWeeklyBillSettlement() {
+        val initialDue = LocalDate.of(2026, 12, 1)
+        val bill = Bill(
+            id = "bw1",
+            name = "Gym Membership",
+            amount = 50.0,
+            dueDayOfMonth = 1,
+            category = "Fitness",
+            recurrence = com.example.financehome.data.model.BillRecurrence.BI_WEEKLY,
+            nextDueDateEpochDay = initialDue.toEpochDay()
+        )
+
+        val nextDue = bill.advanceDueDate(initialDue)
+        assertEquals(LocalDate.of(2026, 12, 15), nextDue)
+
+        val paidBill = bill.copy(
+            nextDueDateEpochDay = nextDue.toEpochDay(),
+            lastSettledDateEpochDay = initialDue.toEpochDay()
+        )
+
+        assertTrue(paidBill.isPaidForDate(LocalDate.of(2026, 12, 1)))
+        assertFalse(paidBill.isPaidForDate(LocalDate.of(2026, 12, 15)))
+    }
 }
 

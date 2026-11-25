@@ -25,6 +25,15 @@ interface BillDao {
     @Query("UPDATE bills SET isPaidThisMonth = :isPaid, lastPaidTimestampMillis = :timestamp WHERE id = :id")
     suspend fun markPaid(id: String, isPaid: Boolean, timestamp: Long?)
 
+    @Query("UPDATE bills SET nextDueDateEpochDay = :nextDueDateEpochDay, lastSettledDateEpochDay = :lastSettledDateEpochDay, isPaidThisMonth = :isPaid, lastPaidTimestampMillis = :timestamp WHERE id = :id")
+    suspend fun updateSettlement(
+        id: String,
+        nextDueDateEpochDay: Long,
+        lastSettledDateEpochDay: Long?,
+        isPaid: Boolean,
+        timestamp: Long?
+    )
+
     @Query("UPDATE bills SET isPaidThisMonth = 0")
     suspend fun resetMonthlyPaidStatus()
 

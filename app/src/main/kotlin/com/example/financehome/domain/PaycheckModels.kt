@@ -22,7 +22,10 @@ data class MonthlyGlimpse(
     val totalBills: Double,
     val totalDebts: Double,
     val totalObligations: Double,
-    val netSurplus: Double
+    val netSurplus: Double,
+    val unpaidBills: Double = totalBills,
+    val unpaidDebts: Double = totalDebts,
+    val unpaidObligations: Double = totalObligations
 )
 
 enum class PayFrequency(
@@ -114,7 +117,10 @@ data class PaycheckBreakdown(
     val baselineSafeToSpend: Double = 0.0,
     val isCurrentPeriodOvertime: Boolean = false,
     val currentPeriodOvertimeHours: Double = 0.0,
-    val currentPeriodReserveHeldForFutureChecks: Double = 0.0
+    val currentPeriodReserveHeldForFutureChecks: Double = 0.0,
+    val unpaidWindowBillsTotal: Double = windowBillsTotal,
+    val unpaidWindowDebtsTotal: Double = windowDebtsTotal,
+    val unpaidWindowObligationsTotal: Double = windowObligationsTotal
 ) {
     // Backwards compatibility properties
     val billsDueInPeriod: List<UpcomingBillScheduleItem>

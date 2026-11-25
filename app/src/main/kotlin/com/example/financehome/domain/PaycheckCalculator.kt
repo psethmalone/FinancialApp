@@ -56,6 +56,10 @@ object PaycheckCalculator {
         val windowDebtsTotal = obligationsDueInPeriod.filter { it.type == ObligationType.DEBT }.sumOf { it.amount }
         val windowObligationsTotal = windowBillsTotal + windowDebtsTotal
 
+        val unpaidWindowBillsTotal = obligationsDueInPeriod.filter { it.type == ObligationType.BILL && !it.isPaid }.sumOf { it.amount }
+        val unpaidWindowDebtsTotal = obligationsDueInPeriod.filter { it.type == ObligationType.DEBT && !it.isPaid }.sumOf { it.amount }
+        val unpaidWindowObligationsTotal = unpaidWindowBillsTotal + unpaidWindowDebtsTotal
+
         // Variance between steady deposit and cash needed in this window
         val windowVariance = perPaycheckReserve - windowObligationsTotal
 
@@ -126,7 +130,10 @@ object PaycheckCalculator {
             baselineSafeToSpend = baselineSafeToSpend,
             isCurrentPeriodOvertime = effectiveIsCurrentPeriodOvertime,
             currentPeriodOvertimeHours = currentPeriodOvertimeHours,
-            currentPeriodReserveHeldForFutureChecks = upcomingPayPeriods.firstOrNull()?.reserveHeldForFutureChecks ?: 0.0
+            currentPeriodReserveHeldForFutureChecks = upcomingPayPeriods.firstOrNull()?.reserveHeldForFutureChecks ?: 0.0,
+            unpaidWindowBillsTotal = unpaidWindowBillsTotal,
+            unpaidWindowDebtsTotal = unpaidWindowDebtsTotal,
+            unpaidWindowObligationsTotal = unpaidWindowObligationsTotal
         )
     }
 
@@ -415,7 +422,7 @@ object PaycheckCalculator {
                             dueDayOfMonth = bill.dueDayOfMonth,
                             dueDate = curr,
                             type = ObligationType.BILL,
-                            isPaid = bill.isPaidThisMonth,
+                            isPaid = bill.isPaidForDate(curr),
                             subtitle = bill.category,
                             originalBill = bill
                         )
@@ -523,7 +530,8 @@ object PaycheckCalculator {
             val next = calculateFollowingPayDate(start, frequency)
             val windowObligations = getScheduledObligationsInWindow(bills, debts, start, next)
             val totalObligations = windowObligations.sumOf { it.amount }
-            val rawSafe = takeHome - totalObligations
+            val unpaidTotalObligations = windowObligations.filter { !it.isPaid }.sumOf { it.amount }
+            val rawSafe = takeHome - unpaidTotalObligations
 
             rawPeriods.add(
                 RawPeriod(
@@ -719,6 +727,20 @@ object PaycheckCalculator {
     }
 
     /**
+     * Calculates the total upcoming unpaid liabilities (unsettled bills and active debt minimums)
+     * between [startDate] and [endDate] (inclusive of startDate, exclusive of endDate).
+     */
+    fun calculateUpcomingUnpaidLiabilities(
+        bills: List<Bill>,
+        debts: List<Debt> = emptyList(),
+        startDate: LocalDate,
+        endDate: LocalDate
+    ): Double {
+        val obligations = getScheduledObligationsInWindow(bills, debts, startDate, endDate)
+        return obligations.filter { !it.isPaid }.sumOf { it.amount }
+    }
+
+    /**
      * Calculates monthly quick glimpse for a specified [year] and [month].
      * Includes estimated income based on scheduled paychecks count,
      * total bills, active debt minimums, and projected net surplus.
@@ -749,6 +771,16 @@ object PaycheckCalculator {
         val totalObligations = totalBills + totalDebts
         val netSurplus = estimatedIncome - totalObligations
 
+        val daysInMonth = YearMonth.of(year, month).lengthOfMonth()
+        val unpaidBills = bills.filter {
+            val dueDay = minOf(it.dueDayOfMonth, daysInMonth)
+            val dueDate = LocalDate.of(year, month, dueDay)
+            !it.isPaidForDate(dueDate)
+        }.sumOf { it.amount }
+
+        val unpaidDebts = debts.filter { it.currentBalance > 0.0 && !it.isPaidThisMonth }.sumOf { it.minimumPayment }
+        val unpaidObligations = unpaidBills + unpaidDebts
+
         return MonthlyGlimpse(
             year = year,
             month = month,
@@ -757,7 +789,10 @@ object PaycheckCalculator {
             totalBills = totalBills,
             totalDebts = totalDebts,
             totalObligations = totalObligations,
-            netSurplus = netSurplus
+            netSurplus = netSurplus,
+            unpaidBills = unpaidBills,
+            unpaidDebts = unpaidDebts,
+            unpaidObligations = unpaidObligations
         )
     }
 }

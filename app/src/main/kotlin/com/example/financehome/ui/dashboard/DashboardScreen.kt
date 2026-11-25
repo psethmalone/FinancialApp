@@ -1,5 +1,6 @@
 package com.example.financehome.ui.dashboard
 
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -24,6 +25,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.financehome.data.local.CategoryTotal
+import com.example.financehome.data.model.Bill
 import com.example.financehome.data.model.ReceiptItem
 import com.example.financehome.data.model.Transaction
 import com.example.financehome.data.model.TransactionType
@@ -69,6 +71,7 @@ fun DashboardScreen(
     var showSpendingThresholdDialog by remember { mutableStateOf(false) }
 
     val safeToSpendStatus by viewModel.safeToSpendStatus.collectAsState()
+    val monthlyOutlook by viewModel.monthlyOutlook.collectAsState()
     val spendingAlertConfig by viewModel.spendingAlertConfig.collectAsState()
 
     val searchQuery by viewModel.searchQuery.collectAsState()
@@ -312,13 +315,13 @@ fun DashboardScreen(
                             .padding(horizontal = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        // Real-Time Safe-to-Spend Live Burn & Pace Card
+                        // Unified Top Hero Card with Upgraded Monthly Financial Outlook UI
                         item {
-                            SafeToSpendGaugeCard(
-                                status = safeToSpendStatus,
+                            UnifiedMonthlyHeroCard(
+                                outlook = monthlyOutlook,
                                 currencyFormat = currencyFormat,
-                                onNavigateToCashFlow = { onNavigateToCashFlow(false) },
-                                onConfigureThreshold = { showSpendingThresholdDialog = true }
+                                onToggleBillPaid = { bill -> viewModel.toggleBillPaid(bill) },
+                                onNavigateToCashFlow = { onNavigateToCashFlow(false) }
                             )
                         }
 
@@ -503,53 +506,6 @@ fun DashboardScreen(
                             }
                         }
 
-                        // Net Position Card
-                        item {
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(20.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                                )
-                            ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(20.dp)
-                                ) {
-                                    Text(
-                                        text = "Net Cash & Debt Position",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Text(
-                                        text = currencyFormat.format(netPosition),
-                                        style = MaterialTheme.typography.headlineLarge.copy(
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = if (netPosition >= 0) ColorIncome else ColorExpense
-                                        )
-                                    )
-                                    Spacer(modifier = Modifier.height(10.dp))
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = if (netPosition >= 0) Icons.Default.TrendingUp else Icons.Default.TrendingDown,
-                                            contentDescription = null,
-                                            tint = if (netPosition >= 0) ColorIncome else ColorExpense,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                        Text(
-                                            text = if (netPosition >= 0) "Cash deposits exceed tracked debt" else "Outstanding debts exceed cash",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                                        )
-                                    }
-                                }
-                            }
-                        }
 
                         // Quick Stats Row: Spending vs Debt
                         item {
@@ -835,71 +791,63 @@ fun DashboardScreen(
 }
 
 @Composable
-fun SafeToSpendGaugeCard(
-    status: SafeToSpendStatus,
+fun UnifiedMonthlyHeroCard(
+    outlook: DashboardMonthlyOutlook,
     currencyFormat: NumberFormat,
+    onToggleBillPaid: (Bill) -> Unit,
     onNavigateToCashFlow: () -> Unit,
-    onConfigureThreshold: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val statusLabel: String
-    val badgeColor: Color
-    val badgeTextColor: Color
-    val badgeIcon: ImageVector
-    when (status.alertLevel) {
-        SafeToSpendAlertLevel.DEFICIT_STOP -> {
-            statusLabel = "DEFICIT: STOP SPENDING"
-            badgeColor = MaterialTheme.colorScheme.errorContainer
-            badgeTextColor = MaterialTheme.colorScheme.onErrorContainer
-            badgeIcon = Icons.Default.Warning
-        }
-        SafeToSpendAlertLevel.LOW_WARNING -> {
-            statusLabel = "LOW CUSHION WARNING"
-            badgeColor = MaterialTheme.colorScheme.tertiaryContainer
-            badgeTextColor = MaterialTheme.colorScheme.onTertiaryContainer
-            badgeIcon = Icons.Default.Info
-        }
-        SafeToSpendAlertLevel.HEALTHY -> {
-            statusLabel = "SAFE-TO-SPEND HEALTHY"
-            badgeColor = MaterialTheme.colorScheme.secondaryContainer
-            badgeTextColor = MaterialTheme.colorScheme.onSecondaryContainer
-            badgeIcon = Icons.Default.CheckCircle
-        }
-    }
+    var isExpanded by remember { mutableStateOf(false) }
 
-    val progress = if (status.initialSafeToSpend > 0) {
-        (status.spentThisCycle / status.initialSafeToSpend).coerceIn(0.0, 1.0).toFloat()
-    } else {
-        if (status.spentThisCycle > 0) 1.0f else 0.0f
-    }
-
-    val progressColor = when (status.alertLevel) {
-        SafeToSpendAlertLevel.DEFICIT_STOP -> ColorExpense
-        SafeToSpendAlertLevel.LOW_WARNING -> ColorWarning
-        SafeToSpendAlertLevel.HEALTHY -> ColorIncome
+    val statusBadgeColor: Color
+    val statusTextColor: Color
+    val statusIcon: ImageVector
+    when (outlook.statusLevel) {
+        OutlookStatusLevel.ON_TRACK -> {
+            statusBadgeColor = ColorIncome.copy(alpha = 0.15f)
+            statusTextColor = ColorIncome
+            statusIcon = Icons.Default.CheckCircle
+        }
+        OutlookStatusLevel.TIGHT -> {
+            statusBadgeColor = ColorWarning.copy(alpha = 0.18f)
+            statusTextColor = ColorWarning
+            statusIcon = Icons.Default.Info
+        }
+        OutlookStatusLevel.SHORTFALL -> {
+            statusBadgeColor = ColorExpense.copy(alpha = 0.18f)
+            statusTextColor = ColorExpense
+            statusIcon = Icons.Default.Warning
+        }
     }
 
     Card(
-        onClick = onNavigateToCashFlow,
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
-        )
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)
+        ),
+        modifier = modifier.fillMaxWidth()
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(18.dp)
         ) {
+            // ── Tier A: Top Header ─────────────────────────────────────────────
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                Text(
+                    text = "Projected End-of-Month Balance",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
                 Surface(
-                    color = badgeColor,
-                    shape = RoundedCornerShape(8.dp)
+                    color = statusBadgeColor,
+                    shape = RoundedCornerShape(12.dp)
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -907,96 +855,435 @@ fun SafeToSpendGaugeCard(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Icon(
-                            badgeIcon,
+                            imageVector = statusIcon,
                             contentDescription = null,
-                            tint = badgeTextColor,
-                            modifier = Modifier.size(14.dp)
+                            tint = statusTextColor,
+                            modifier = Modifier.size(13.dp)
                         )
                         Text(
-                            text = statusLabel,
+                            text = outlook.statusLevel.label,
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                            color = badgeTextColor
+                            color = statusTextColor
                         )
                     }
                 }
+            }
 
-                IconButton(
-                    onClick = onConfigureThreshold,
-                    modifier = Modifier.size(28.dp)
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Primary Projected Balance with Tabular Figures
+            Text(
+                text = currencyFormat.format(outlook.projectedEndOfMonthBalance),
+                style = MaterialTheme.typography.headlineLarge.copy(
+                    fontWeight = FontWeight.ExtraBold,
+                    fontFeatureSettings = "tnum",
+                    color = if (outlook.projectedEndOfMonthBalance >= 0) MaterialTheme.colorScheme.onSurface else ColorExpense
+                )
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Current Available Balance Sub-label
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.clickable { onNavigateToCashFlow() }
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AccountBalanceWallet,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(15.dp)
+                )
+                Text(
+                    text = "Current Available Balance: ${currencyFormat.format(outlook.currentAvailableBalance)}",
+                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "→",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // ── Tier B: Middle Visual (Runway Bar + 3-Column Summary) ───────────
+            val bufferAmount = outlook.currentAvailableBalance.coerceAtLeast(0.0)
+            val billsAmount = outlook.remainingBills.coerceAtLeast(0.0)
+            val totalRunway = bufferAmount + billsAmount
+
+            val bufferWeight = if (totalRunway > 0.0) (bufferAmount / totalRunway).toFloat().coerceIn(0.05f, 0.95f) else 0.5f
+            val billsWeight = 1f - bufferWeight
+
+            // Segmented Horizontal Runway Bar
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(10.dp)
+                        .clip(RoundedCornerShape(5.dp))
                 ) {
-                    Icon(
-                        Icons.Default.Tune,
-                        contentDescription = "Alert Thresholds",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp)
+                    Box(
+                        modifier = Modifier
+                            .weight(bufferWeight)
+                            .fillMaxHeight()
+                            .background(ColorIncome)
+                    )
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Box(
+                        modifier = Modifier
+                            .weight(billsWeight)
+                            .fillMaxHeight()
+                            .background(
+                                if (bufferAmount >= billsAmount) MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+                                else ColorExpense
+                            )
                     )
                 }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(ColorIncome)
+                        )
+                        Text(
+                            text = "Buffer: ${currencyFormat.format(outlook.currentAvailableBalance)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (bufferAmount >= billsAmount) MaterialTheme.colorScheme.outline
+                                    else ColorExpense
+                                )
+                        )
+                        Text(
+                            text = "Unpaid Bills: ${currencyFormat.format(outlook.remainingBills)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // 3-Column Summary Row
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 12.dp, horizontal = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Col 1: Expected Inflows
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "Inflows",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "+${currencyFormat.format(outlook.expectedInflows)}",
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFeatureSettings = "tnum"
+                            ),
+                            color = ColorIncome
+                        )
+                    }
+
+                    VerticalDivider(
+                        modifier = Modifier
+                            .height(30.dp)
+                            .padding(vertical = 2.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant
+                    )
+
+                    // Col 2: Remaining Bills
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "Remaining Bills",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "-${currencyFormat.format(outlook.remainingBills)}",
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFeatureSettings = "tnum"
+                            ),
+                            color = if (outlook.remainingBills > 0) ColorExpense else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    VerticalDivider(
+                        modifier = Modifier
+                            .height(30.dp)
+                            .padding(vertical = 2.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant
+                    )
+
+                    // Col 3: Projected Net
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "Projected Net",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        val isNetPositive = outlook.projectedEndOfMonthBalance >= 0
+                        Text(
+                            text = "${if (isNetPositive) "+" else ""}${currencyFormat.format(outlook.projectedEndOfMonthBalance)}",
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFeatureSettings = "tnum"
+                            ),
+                            color = if (isNetPositive) ColorIncome else ColorExpense
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // ── Tier C: Bottom Expandable Strip ────────────────────────────────
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            Text(
-                text = "Safe-to-Spend Left",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Spacer(modifier = Modifier.height(2.dp))
-
+            val nextEvent = outlook.immediateNextEvent
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Bottom
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { isExpanded = !isExpanded },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(
-                    text = currencyFormat.format(status.remainingSafeToSpend),
-                    style = MaterialTheme.typography.headlineMedium.copy(
-                        fontWeight = FontWeight.ExtraBold,
-                        color = when (status.alertLevel) {
-                            SafeToSpendAlertLevel.DEFICIT_STOP -> ColorExpense
-                            SafeToSpendAlertLevel.LOW_WARNING -> ColorWarning
-                            SafeToSpendAlertLevel.HEALTHY -> MaterialTheme.colorScheme.primary
+                if (nextEvent != null) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (nextEvent.isIncome) ColorIncome.copy(alpha = 0.15f)
+                                    else MaterialTheme.colorScheme.primaryContainer
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (nextEvent.isIncome) Icons.Default.ArrowUpward else Icons.Default.Receipt,
+                                contentDescription = null,
+                                tint = if (nextEvent.isIncome) ColorIncome else MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(15.dp)
+                            )
                         }
-                    )
-                )
 
-                if (status.daysRemainingInCycle > 0 && status.remainingSafeToSpend > 0) {
-                    Text(
-                        text = "${currencyFormat.format(status.dailyPace)}/day",
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = nextEvent.title,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (nextEvent.isPaid) {
+                                    Surface(
+                                        color = ColorIncome.copy(alpha = 0.15f),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            text = "PAID",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = ColorIncome,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Text(
+                                text = "Due ${nextEvent.date.format(DateTimeFormatter.ofPattern("MMM d"))} • ${currencyFormat.format(nextEvent.amount)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (nextEvent.originalBill != null && !nextEvent.isPaid) {
+                            FilledTonalButton(
+                                onClick = { onToggleBillPaid(nextEvent.originalBill) },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(28.dp)
+                            ) {
+                                Text("Mark Paid", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+
+                        IconButton(
+                            onClick = { isExpanded = !isExpanded },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = if (isExpanded) "Collapse" else "Expand",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("🎉", fontSize = 16.sp)
+                        Text(
+                            text = "No more scheduled events for this month",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(8.dp)
-                    .clip(RoundedCornerShape(4.dp)),
-                color = progressColor,
-                trackColor = MaterialTheme.colorScheme.surfaceVariant
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+            // Animated Expandable Drawer
+            AnimatedVisibility(
+                visible = isExpanded,
+                enter = expandVertically(),
+                exit = shrinkVertically()
             ) {
-                Text(
-                    text = "Spent: ${currencyFormat.format(status.spentThisCycle)} of ${currencyFormat.format(status.initialSafeToSpend)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "${status.daysRemainingInCycle}d to payday (${status.nextPayDate.format(DateTimeFormatter.ofPattern("MMM d"))})",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Remaining Schedule (${outlook.chronologicalEvents.size} events)",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    outlook.chronologicalEvents.forEach { event ->
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (event.isIncome) Icons.Default.ArrowUpward else Icons.Default.Receipt,
+                                        contentDescription = null,
+                                        tint = if (event.isIncome) ColorIncome else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Column {
+                                        Text(
+                                            text = event.title,
+                                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "${event.date.format(DateTimeFormatter.ofPattern("EEE, MMM d"))} • ${currencyFormat.format(event.amount)}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
+                                if (event.originalBill != null) {
+                                    if (event.isPaid) {
+                                        Surface(
+                                            color = ColorIncome.copy(alpha = 0.15f),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text(
+                                                text = "PAID",
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                color = ColorIncome,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    } else {
+                                        OutlinedButton(
+                                            onClick = { onToggleBillPaid(event.originalBill) },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            shape = RoundedCornerShape(6.dp),
+                                            modifier = Modifier.height(26.dp)
+                                        ) {
+                                            Text("Mark Paid", style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
+                                } else if (event.isIncome) {
+                                    Surface(
+                                        color = ColorIncome.copy(alpha = 0.12f),
+                                        shape = RoundedCornerShape(6.dp)
+                                    ) {
+                                        Text(
+                                            text = "INFLOW",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = ColorIncome,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
