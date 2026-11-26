@@ -23,11 +23,15 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import com.example.financehome.data.model.Bill
 import com.example.financehome.data.model.Debt
 import com.example.financehome.data.model.DebtType
 import com.example.financehome.domain.DebtPayoffMilestone
 import com.example.financehome.domain.MultiDebtComparison
+import com.example.financehome.domain.ObligationType
+import com.example.financehome.domain.PayFrequency
 import com.example.financehome.domain.PayoffStrategy
 import com.example.financehome.domain.StrategyPayoffResult
 import com.example.financehome.ui.theme.ColorExpense
@@ -37,7 +41,30 @@ import java.text.NumberFormat
 import java.time.LocalDate
 import java.util.Locale
 
-enum class ObligationTab { BILLS, DEBTS }
+enum class ObligationTab { ALL, BILLS, DEBTS, PROJECTED }
+
+sealed class UnifiedObligation {
+    data class BillObligation(val bill: Bill) : UnifiedObligation()
+    data class DebtObligation(val debt: Debt) : UnifiedObligation()
+
+    val id: String
+        get() = when (this) {
+            is BillObligation -> "bill_${bill.id}"
+            is DebtObligation -> "debt_${debt.id}"
+        }
+
+    val dueDayOfMonth: Int
+        get() = when (this) {
+            is BillObligation -> bill.dueDayOfMonth
+            is DebtObligation -> debt.dueDayOfMonth
+        }
+
+    val name: String
+        get() = when (this) {
+            is BillObligation -> bill.name
+            is DebtObligation -> debt.name
+        }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -55,14 +82,27 @@ fun DebtsScreen(
     val multiDebtComparison by viewModel.multiDebtComparison.collectAsState()
     val extraMonthlyPayoffBudget by viewModel.extraMonthlyPayoffBudget.collectAsState()
 
-    var selectedTab by remember { mutableStateOf(ObligationTab.BILLS) }
+    val scenarioItems by viewModel.projectedScenarioItems.collectAsState()
+    val projectedSummary by viewModel.projectedSummary.collectAsState()
+
+    var selectedTab by remember { mutableStateOf(ObligationTab.ALL) }
     var showAddDebtDialog by remember { mutableStateOf(false) }
     var showAddBillDialog by remember { mutableStateOf(false) }
+    var showAddObligationChoiceDialog by remember { mutableStateOf(false) }
+    var showAddHypotheticalDialog by remember { mutableStateOf(false) }
+    var showEditIncomeDialog by remember { mutableStateOf(false) }
+    var itemToEditScenario by remember { mutableStateOf<ProjectedScenarioItem?>(null) }
     var debtToEdit by remember { mutableStateOf<Debt?>(null) }
     var debtToPay by remember { mutableStateOf<Debt?>(null) }
     var billToPay by remember { mutableStateOf<Bill?>(null) }
 
     val currencyFormat = NumberFormat.getCurrencyInstance(Locale.US)
+
+    val allObligations = remember(bills, debts) {
+        val b = bills.map { UnifiedObligation.BillObligation(it) }
+        val d = debts.map { UnifiedObligation.DebtObligation(it) }
+        (b + d).sortedWith(compareBy({ it.dueDayOfMonth }, { it.name }))
+    }
 
     Scaffold(
         topBar = {
@@ -71,16 +111,22 @@ fun DebtsScreen(
                 actions = {
                     IconButton(
                         onClick = {
-                            if (selectedTab == ObligationTab.BILLS) {
-                                showAddBillDialog = true
-                            } else {
-                                showAddDebtDialog = true
+                            when (selectedTab) {
+                                ObligationTab.ALL -> showAddObligationChoiceDialog = true
+                                ObligationTab.BILLS -> showAddBillDialog = true
+                                ObligationTab.DEBTS -> showAddDebtDialog = true
+                                ObligationTab.PROJECTED -> showAddHypotheticalDialog = true
                             }
                         }
                     ) {
                         Icon(
                             Icons.Default.Add,
-                            contentDescription = if (selectedTab == ObligationTab.BILLS) "Add Bill" else "Add Debt"
+                            contentDescription = when (selectedTab) {
+                                ObligationTab.ALL -> "Add Obligation"
+                                ObligationTab.BILLS -> "Add Bill"
+                                ObligationTab.DEBTS -> "Add Debt"
+                                ObligationTab.PROJECTED -> "Add Simulated Expense"
+                            }
                         )
                     }
                 }
@@ -89,10 +135,11 @@ fun DebtsScreen(
         floatingActionButton = {
             FloatingActionButton(
                 onClick = {
-                    if (selectedTab == ObligationTab.BILLS) {
-                        showAddBillDialog = true
-                    } else {
-                        showAddDebtDialog = true
+                    when (selectedTab) {
+                        ObligationTab.ALL -> showAddObligationChoiceDialog = true
+                        ObligationTab.BILLS -> showAddBillDialog = true
+                        ObligationTab.DEBTS -> showAddDebtDialog = true
+                        ObligationTab.PROJECTED -> showAddHypotheticalDialog = true
                     }
                 },
                 containerColor = MaterialTheme.colorScheme.primary,
@@ -100,7 +147,12 @@ fun DebtsScreen(
             ) {
                 Icon(
                     Icons.Default.Add,
-                    contentDescription = if (selectedTab == ObligationTab.BILLS) "Add Bill" else "Add Debt"
+                    contentDescription = when (selectedTab) {
+                        ObligationTab.ALL -> "Add Obligation"
+                        ObligationTab.BILLS -> "Add Bill"
+                        ObligationTab.DEBTS -> "Add Debt"
+                        ObligationTab.PROJECTED -> "Add Simulated Expense"
+                    }
                 )
             }
         },
@@ -113,72 +165,74 @@ fun DebtsScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            item {
-                Spacer(modifier = Modifier.height(4.dp))
-                // Combined Monthly Fixed Nut Hero Card
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(20.dp)
+            // Combined Monthly Fixed Nut Hero Card (Hidden on Projected tab because Projected has its own live simulation hero card)
+            if (selectedTab != ObligationTab.PROJECTED) {
+                item {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer
+                        )
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(20.dp)
                         ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Total Monthly Fixed Obligations",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                                Icon(
+                                    imageVector = Icons.Default.Receipt,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = "Total Monthly Fixed Obligations",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onErrorContainer
+                                text = currencyFormat.format(totalMonthlyFixedNut) + "/mo",
+                                style = MaterialTheme.typography.headlineLarge.copy(
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
                             )
-                            Icon(
-                                imageVector = Icons.Default.Receipt,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onErrorContainer
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Bills: ${currencyFormat.format(totalMonthlyBills)}",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f)
+                                )
+                                Text(
+                                    text = "Debt Minimums: ${currencyFormat.format(totalMonthlyDebtMinimums)}",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Total Outstanding Debt: ${currencyFormat.format(totalDebt)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.75f)
                             )
                         }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = currencyFormat.format(totalMonthlyFixedNut) + "/mo",
-                            style = MaterialTheme.typography.headlineLarge.copy(
-                                fontWeight = FontWeight.ExtraBold,
-                                color = MaterialTheme.colorScheme.onErrorContainer
-                            )
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "Bills: ${currencyFormat.format(totalMonthlyBills)}",
-                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                                color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f)
-                            )
-                            Text(
-                                text = "Debt Minimums: ${currencyFormat.format(totalMonthlyDebtMinimums)}",
-                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                                color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f)
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Total Outstanding Debt: ${currencyFormat.format(totalDebt)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.75f)
-                        )
                     }
                 }
             }
 
-            // Segmented Tab Switcher (Bills vs Debts)
+            // 4-Tab Segmented Tab Switcher: All | Bills | Debts | Projected
             item {
                 TabRow(
                     selectedTabIndex = selectedTab.ordinal,
@@ -186,12 +240,26 @@ fun DebtsScreen(
                     modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
                 ) {
                     Tab(
+                        selected = selectedTab == ObligationTab.ALL,
+                        onClick = { selectedTab = ObligationTab.ALL },
+                        text = {
+                            Text(
+                                text = "All (${allObligations.size})",
+                                fontWeight = if (selectedTab == ObligationTab.ALL) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 12.sp,
+                                maxLines = 1
+                            )
+                        }
+                    )
+                    Tab(
                         selected = selectedTab == ObligationTab.BILLS,
                         onClick = { selectedTab = ObligationTab.BILLS },
                         text = {
                             Text(
-                                text = "Recurring Bills (${bills.size})",
-                                fontWeight = if (selectedTab == ObligationTab.BILLS) FontWeight.Bold else FontWeight.Normal
+                                text = "Bills (${bills.size})",
+                                fontWeight = if (selectedTab == ObligationTab.BILLS) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 12.sp,
+                                maxLines = 1
                             )
                         }
                     )
@@ -200,8 +268,22 @@ fun DebtsScreen(
                         onClick = { selectedTab = ObligationTab.DEBTS },
                         text = {
                             Text(
-                                text = "Debts & Loans (${debts.size})",
-                                fontWeight = if (selectedTab == ObligationTab.DEBTS) FontWeight.Bold else FontWeight.Normal
+                                text = "Debts (${debts.size})",
+                                fontWeight = if (selectedTab == ObligationTab.DEBTS) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 12.sp,
+                                maxLines = 1
+                            )
+                        }
+                    )
+                    Tab(
+                        selected = selectedTab == ObligationTab.PROJECTED,
+                        onClick = { selectedTab = ObligationTab.PROJECTED },
+                        text = {
+                            Text(
+                                text = "Projected",
+                                fontWeight = if (selectedTab == ObligationTab.PROJECTED) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 12.sp,
+                                maxLines = 1
                             )
                         }
                     )
@@ -209,51 +291,170 @@ fun DebtsScreen(
             }
 
             // Tab Content
-            if (selectedTab == ObligationTab.BILLS) {
-                if (bills.isEmpty()) {
-                    item {
-                        EmptyBillsCard(onAddBill = { showAddBillDialog = true })
-                    }
-                } else {
-                    items(bills, key = { it.id }) { bill ->
-                        BillCardItem(
-                            bill = bill,
-                            currencyFormat = currencyFormat,
-                            onTogglePaid = {
-                                if (bill.isPaidThisMonth) {
-                                    viewModel.toggleBillPaid(bill)
-                                } else {
-                                    billToPay = bill
+            when (selectedTab) {
+                ObligationTab.ALL -> {
+                    if (allObligations.isEmpty()) {
+                        item {
+                            EmptyAllObligationsCard(onAddObligation = { showAddObligationChoiceDialog = true })
+                        }
+                    } else {
+                        items(allObligations, key = { it.id }) { item ->
+                            when (item) {
+                                is UnifiedObligation.BillObligation -> {
+                                    BillCardItem(
+                                        bill = item.bill,
+                                        currencyFormat = currencyFormat,
+                                        onTogglePaid = {
+                                            if (item.bill.isPaidThisMonth) {
+                                                viewModel.toggleBillPaid(item.bill)
+                                            } else {
+                                                billToPay = item.bill
+                                            }
+                                        },
+                                        onDelete = { viewModel.deleteBill(item.bill) }
+                                    )
                                 }
-                            },
-                            onDelete = { viewModel.deleteBill(bill) }
-                        )
+                                is UnifiedObligation.DebtObligation -> {
+                                    DebtCardItem(
+                                        debt = item.debt,
+                                        currencyFormat = currencyFormat,
+                                        onClick = { onDebtSelected(item.debt) },
+                                        onEdit = { debtToEdit = item.debt },
+                                        onPay = { debtToPay = item.debt },
+                                        onTogglePaid = { viewModel.toggleDebtPaid(item.debt) }
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
-            } else {
-                if (debts.isEmpty()) {
-                    item {
-                        EmptyDebtsCard(onAddDebt = { showAddDebtDialog = true })
+                ObligationTab.BILLS -> {
+                    if (bills.isEmpty()) {
+                        item {
+                            EmptyBillsCard(onAddBill = { showAddBillDialog = true })
+                        }
+                    } else {
+                        items(bills, key = { it.id }) { bill ->
+                            BillCardItem(
+                                bill = bill,
+                                currencyFormat = currencyFormat,
+                                onTogglePaid = {
+                                    if (bill.isPaidThisMonth) {
+                                        viewModel.toggleBillPaid(bill)
+                                    } else {
+                                        billToPay = bill
+                                    }
+                                },
+                                onDelete = { viewModel.deleteBill(bill) }
+                            )
+                        }
                     }
-                } else {
+                }
+                ObligationTab.DEBTS -> {
+                    if (debts.isEmpty()) {
+                        item {
+                            EmptyDebtsCard(onAddDebt = { showAddDebtDialog = true })
+                        }
+                    } else {
+                        item {
+                            DebtPayoffOptimizerCard(
+                                comparison = multiDebtComparison,
+                                currentExtra = extraMonthlyPayoffBudget,
+                                currencyFormat = currencyFormat,
+                                onExtraChanged = { viewModel.setExtraMonthlyPayoffBudget(it) }
+                            )
+                        }
+
+                        items(debts, key = { it.id }) { debt ->
+                            DebtCardItem(
+                                debt = debt,
+                                currencyFormat = currencyFormat,
+                                onClick = { onDebtSelected(debt) },
+                                onEdit = { debtToEdit = debt },
+                                onPay = { debtToPay = debt },
+                                onTogglePaid = { viewModel.toggleDebtPaid(debt) }
+                            )
+                        }
+                    }
+                }
+                ObligationTab.PROJECTED -> {
                     item {
-                        DebtPayoffOptimizerCard(
-                            comparison = multiDebtComparison,
-                            currentExtra = extraMonthlyPayoffBudget,
+                        ProjectedHeroCard(
+                            summary = projectedSummary,
                             currencyFormat = currencyFormat,
-                            onExtraChanged = { viewModel.setExtraMonthlyPayoffBudget(it) }
+                            onResetToActuals = { viewModel.resetScenarioToActuals() }
                         )
                     }
 
-                    items(debts, key = { it.id }) { debt ->
-                        DebtCardItem(
-                            debt = debt,
+                    item {
+                        ProjectedIncomeFrequencyCard(
+                            summary = projectedSummary,
                             currencyFormat = currencyFormat,
-                            onClick = { onDebtSelected(debt) },
-                            onEdit = { debtToEdit = debt },
-                            onPay = { debtToPay = debt },
-                            onTogglePaid = { viewModel.toggleDebtPaid(debt) }
+                            onEditIncome = { showEditIncomeDialog = true },
+                            onFrequencySelected = { viewModel.updateProjectedFrequency(it) }
                         )
+                    }
+
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Simulated Obligations (${projectedSummary.enabledItemsCount}/${projectedSummary.totalItemsCount} active)",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                )
+                                Text(
+                                    text = "Toggle checkboxes to exclude expenses. Tap amount to simulate rate changes.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    item {
+                        OutlinedButton(
+                            onClick = { showAddHypotheticalDialog = true },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Add Hypothetical Expense")
+                        }
+                    }
+
+                    if (scenarioItems.isEmpty()) {
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                            ) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth().padding(24.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text("No bills or debts found to project.", style = MaterialTheme.typography.bodyMedium)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Button(onClick = { showAddHypotheticalDialog = true }) {
+                                        Text("Add a Hypothetical Expense")
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        items(scenarioItems, key = { it.id }) { item ->
+                            ProjectedScenarioItemCard(
+                                item = item,
+                                currencyFormat = currencyFormat,
+                                onToggleEnabled = { viewModel.toggleScenarioItemEnabled(item.id) },
+                                onEditAmount = { itemToEditScenario = item },
+                                onRemove = if (item.isHypothetical) { { viewModel.removeHypotheticalItem(item.id) } } else null
+                            )
+                        }
                     }
                 }
             }
@@ -281,6 +482,41 @@ fun DebtsScreen(
                 viewModel.addDebt(name, balance, apr, minPayment, type, dueDay)
                 showAddDebtDialog = false
             }
+        )
+    }
+
+    if (showAddObligationChoiceDialog) {
+        AddObligationChoiceDialog(
+            onDismiss = { showAddObligationChoiceDialog = false },
+            onChooseAddBill = { showAddBillDialog = true },
+            onChooseAddDebt = { showAddDebtDialog = true }
+        )
+    }
+
+    if (showAddHypotheticalDialog) {
+        AddHypotheticalExpenseDialog(
+            onDismiss = { showAddHypotheticalDialog = false },
+            onAdd = { name, amount, type, dueDay ->
+                viewModel.addHypotheticalItem(name, amount, type, dueDay)
+            }
+        )
+    }
+
+    if (showEditIncomeDialog) {
+        EditProjectedIncomeDialog(
+            currentIncome = projectedSummary.projectedIncomePerPaycheck,
+            currencyFormat = currencyFormat,
+            onDismiss = { showEditIncomeDialog = false },
+            onSave = { viewModel.updateProjectedIncome(it) }
+        )
+    }
+
+    if (itemToEditScenario != null) {
+        EditScenarioAmountDialog(
+            item = itemToEditScenario!!,
+            currencyFormat = currencyFormat,
+            onDismiss = { itemToEditScenario = null },
+            onSave = { viewModel.updateScenarioItemAmount(itemToEditScenario!!.id, it) }
         )
     }
 
@@ -1668,6 +1904,772 @@ fun PayDebtDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Combined Obligations & Projection Sandbox Composables
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun EmptyAllObligationsCard(onAddObligation: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                Icons.Default.ReceiptLong,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.size(56.dp)
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "No obligations yet",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Add recurring bills and debts to track your complete monthly fixed commitments and paycheck reserve.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(onClick = onAddObligation) {
+                Text("Add Your First Obligation")
+            }
+        }
+    }
+}
+
+@Composable
+fun ProjectedHeroCard(
+    summary: ProjectedSummary,
+    currencyFormat: NumberFormat,
+    onResetToActuals: () -> Unit
+) {
+    val isSurplus = summary.isSurplus
+    val cardBg = if (isSurplus) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer
+    val contentColor = if (isSurplus) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = cardBg)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.TrendingUp,
+                        contentDescription = null,
+                        tint = contentColor,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = "PROJECTED MONTHLY NEED",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = contentColor
+                    )
+                }
+                if (summary.isCustomized) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = contentColor.copy(alpha = 0.15f),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onResetToActuals() }
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = "Reset",
+                                tint = contentColor,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "Reset to Actuals",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
+                                color = contentColor
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "${currencyFormat.format(summary.totalProjectedMonthlyNeed)} / mo",
+                style = MaterialTheme.typography.headlineLarge.copy(
+                    fontWeight = FontWeight.ExtraBold,
+                    color = contentColor
+                )
+            )
+
+            val deltaText = when {
+                summary.monthlyNeedDelta > 0.01 -> "+${currencyFormat.format(summary.monthlyNeedDelta)} vs current actuals"
+                summary.monthlyNeedDelta < -0.01 -> "-${currencyFormat.format(-summary.monthlyNeedDelta)} vs current actuals"
+                else -> "Matches current actuals (${currencyFormat.format(summary.totalActualMonthlyNeed)}/mo)"
+            }
+            Text(
+                text = deltaText,
+                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                color = contentColor.copy(alpha = 0.85f)
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // 3-Metric KPI Grid
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Needed Per Check
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = contentColor.copy(alpha = 0.08f),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Text(
+                            text = "Needed / Check",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                            color = contentColor.copy(alpha = 0.75f)
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = currencyFormat.format(summary.neededPerPaycheck),
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = contentColor
+                        )
+                    }
+                }
+
+                // Savings / Check
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = contentColor.copy(alpha = 0.08f),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Text(
+                            text = "Savings / Check",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                            color = contentColor.copy(alpha = 0.75f)
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = if (isSurplus) currencyFormat.format(summary.savingsPerPaycheck) else "-${currencyFormat.format(summary.deficitPerPaycheck)}",
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = if (isSurplus) ColorIncome else ColorExpense
+                            )
+                        )
+                    }
+                }
+
+                // Monthly Savings
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = contentColor.copy(alpha = 0.08f),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Text(
+                            text = "Monthly Saved",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                            color = contentColor.copy(alpha = 0.75f)
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = currencyFormat.format(summary.projectedMonthlySavings),
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = contentColor
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Annualized & Surplus banner
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = contentColor.copy(alpha = 0.1f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (isSurplus) {
+                            "Annual Savings: ${currencyFormat.format(summary.projectedAnnualSavings)}"
+                        } else {
+                            "Deficit: -${currencyFormat.format(summary.deficitPerPaycheck)} / check"
+                        },
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = contentColor
+                    )
+                    Text(
+                        text = "${String.format(Locale.US, "%.1f", summary.fixedNutPercentageOfIncome)}% of Income",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = contentColor.copy(alpha = 0.85f)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ProjectedIncomeFrequencyCard(
+    summary: ProjectedSummary,
+    currencyFormat: NumberFormat,
+    onEditIncome: () -> Unit,
+    onFrequencySelected: (PayFrequency) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "Paycheck Take-Home Pay",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "${currencyFormat.format(summary.projectedIncomePerPaycheck)} / check",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                OutlinedButton(
+                    onClick = onEditIncome,
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Change")
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "Pay Frequency (${summary.payFrequency.displayName})",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    PayFrequency.entries.forEach { freq ->
+                        val isSelected = summary.payFrequency == freq
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = { onFrequencySelected(freq) },
+                            label = {
+                                Text(
+                                    text = when (freq) {
+                                        PayFrequency.WEEKLY -> "Wkly"
+                                        PayFrequency.BI_WEEKLY -> "Bi-Wk"
+                                        PayFrequency.SEMI_MONTHLY -> "Semi-Mo"
+                                        PayFrequency.MONTHLY -> "Mthly"
+                                    },
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ProjectedScenarioItemCard(
+    item: ProjectedScenarioItem,
+    currencyFormat: NumberFormat,
+    onToggleEnabled: () -> Unit,
+    onEditAmount: () -> Unit,
+    onRemove: (() -> Unit)? = null
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (item.isEnabled) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (item.isEnabled) 1.dp else 0.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Checkbox to include/exclude
+            Checkbox(
+                checked = item.isEnabled,
+                onCheckedChange = { onToggleEnabled() }
+            )
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = item.name,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            textDecoration = if (!item.isEnabled) TextDecoration.LineThrough else TextDecoration.None
+                        ),
+                        color = if (item.isEnabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    if (item.isHypothetical) {
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f)
+                        ) {
+                            Text(
+                                text = "Hypothetical",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val badgeText = when {
+                        item.isHypothetical -> item.type.name
+                        item.type == ObligationType.BILL -> "Bill • Day ${item.dueDayOfMonth}"
+                        else -> "Debt Min • Day ${item.dueDayOfMonth}"
+                    }
+                    Text(
+                        text = badgeText,
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    if (!item.isHypothetical && item.delta != 0.0) {
+                        val isIncrease = item.delta > 0
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = if (isIncrease) ColorExpense.copy(alpha = 0.15f) else ColorIncome.copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                text = (if (isIncrease) "+" else "") + currencyFormat.format(item.delta),
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 10.sp
+                                ),
+                                color = if (isIncrease) ColorExpense else ColorIncome,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Amount button (click to edit simulated amount)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onEditAmount() }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = currencyFormat.format(item.simulatedAmount),
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                textDecoration = if (!item.isEnabled) TextDecoration.LineThrough else TextDecoration.None
+                            ),
+                            color = if (item.isEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                        )
+                        Icon(
+                            Icons.Default.Edit,
+                            contentDescription = "Edit Amount",
+                            tint = if (item.isEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.size(12.dp)
+                        )
+                    }
+                }
+
+                if (onRemove != null) {
+                    IconButton(onClick = onRemove) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Delete",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AddObligationChoiceDialog(
+    onDismiss: () -> Unit,
+    onChooseAddBill: () -> Unit,
+    onChooseAddDebt: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Obligation") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "Select what type of obligation you want to create:",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                OutlinedCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            onDismiss()
+                            onChooseAddBill()
+                        },
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Receipt,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Column {
+                            Text("Recurring Bill", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                            Text("Rent, utilities, subscriptions, insurance", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+
+                OutlinedCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            onDismiss()
+                            onChooseAddDebt()
+                        },
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.CreditCard,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.secondary
+                        )
+                        Column {
+                            Text("Debt or Loan", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                            Text("Credit card, auto loan, mortgage, personal loan", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun EditProjectedIncomeDialog(
+    currentIncome: Double,
+    currencyFormat: NumberFormat,
+    onDismiss: () -> Unit,
+    onSave: (Double) -> Unit
+) {
+    var incomeText by remember { mutableStateOf(if (currentIncome > 0) String.format(Locale.US, "%.2f", currentIncome) else "") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Simulate Paycheck Take-Home") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "Enter your expected take-home pay per paycheck to see how much you need and how much you can save.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = incomeText,
+                    onValueChange = { incomeText = it },
+                    label = { Text("Take-Home Pay ($)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val amount = incomeText.toDoubleOrNull() ?: 0.0
+                    onSave(amount)
+                    onDismiss()
+                }
+            ) {
+                Text("Apply")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun EditScenarioAmountDialog(
+    item: ProjectedScenarioItem,
+    currencyFormat: NumberFormat,
+    onDismiss: () -> Unit,
+    onSave: (Double) -> Unit
+) {
+    var amountText by remember { mutableStateOf(String.format(Locale.US, "%.2f", item.simulatedAmount)) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Simulate ${item.name}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (!item.isHypothetical) {
+                    Text(
+                        text = "Original amount: ${currencyFormat.format(item.originalAmount)}/mo",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                OutlinedTextField(
+                    value = amountText,
+                    onValueChange = { amountText = it },
+                    label = { Text("Simulated Monthly Amount ($)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Text("Quick Adjustments:", style = MaterialTheme.typography.labelSmall)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(-50.0, -20.0, 20.0, 50.0).forEach { delta ->
+                        OutlinedButton(
+                            onClick = {
+                                val cur = amountText.toDoubleOrNull() ?: item.simulatedAmount
+                                val newVal = maxOf(0.0, cur + delta)
+                                amountText = String.format(Locale.US, "%.2f", newVal)
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = (if (delta > 0) "+" else "") + delta.toInt().toString(),
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                }
+                if (!item.isHypothetical) {
+                    TextButton(
+                        onClick = {
+                            amountText = String.format(Locale.US, "%.2f", item.originalAmount)
+                        },
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Text("Reset to Original")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val amount = amountText.toDoubleOrNull() ?: item.simulatedAmount
+                    onSave(amount)
+                    onDismiss()
+                }
+            ) {
+                Text("Apply")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun AddHypotheticalExpenseDialog(
+    onDismiss: () -> Unit,
+    onAdd: (name: String, amount: Double, type: ObligationType, dueDay: Int) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var amountText by remember { mutableStateOf("") }
+    var type by remember { mutableStateOf(ObligationType.BILL) }
+    var dueDayText by remember { mutableStateOf("1") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Hypothetical Expense") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Add a simulated bill or debt to see how it affects your monthly need, savings, and paycheck reserve.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Expense Name (e.g. New Rent, Gym)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = amountText,
+                    onValueChange = { amountText = it },
+                    label = { Text("Monthly Amount ($)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = type == ObligationType.BILL,
+                        onClick = { type = ObligationType.BILL },
+                        label = { Text("Recurring Bill") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    FilterChip(
+                        selected = type == ObligationType.DEBT,
+                        onClick = { type = ObligationType.DEBT },
+                        label = { Text("Debt / Loan") },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val amt = amountText.toDoubleOrNull() ?: 0.0
+                    val day = dueDayText.toIntOrNull() ?: 1
+                    if (name.isNotBlank() && amt > 0.0) {
+                        onAdd(name.trim(), amt, type, day)
+                        onDismiss()
+                    }
+                },
+                enabled = name.isNotBlank() && (amountText.toDoubleOrNull() ?: 0.0) > 0.0
+            ) {
+                Text("Add to Scenario")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
         }
     )
 }

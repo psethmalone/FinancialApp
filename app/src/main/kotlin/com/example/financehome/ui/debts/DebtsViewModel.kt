@@ -22,6 +22,8 @@ import com.example.financehome.data.model.TransactionSource
 import com.example.financehome.data.model.TransactionType
 import com.example.financehome.data.repository.TransactionRepository
 import com.example.financehome.data.repository.SpendingAlertRepository
+import com.example.financehome.domain.ObligationType
+import com.example.financehome.domain.PayFrequency
 import com.example.financehome.domain.SafeToSpendStatus
 import com.example.financehome.domain.SpendingAlertConfig
 import com.example.financehome.service.SpendingAlertManager
@@ -42,6 +44,37 @@ data class PayoffSimulation(
     val monthsSaved: Int,
     val interestSaved: Double,
     val amortizationRows: List<AmortizationRow>
+)
+
+data class ProjectedScenarioItem(
+    val id: String,
+    val name: String,
+    val originalAmount: Double,
+    val simulatedAmount: Double,
+    val type: ObligationType,
+    val dueDayOfMonth: Int,
+    val isEnabled: Boolean = true,
+    val isHypothetical: Boolean = false
+) {
+    val delta: Double get() = simulatedAmount - originalAmount
+}
+
+data class ProjectedSummary(
+    val totalProjectedMonthlyNeed: Double,
+    val totalActualMonthlyNeed: Double,
+    val monthlyNeedDelta: Double,
+    val projectedIncomePerPaycheck: Double,
+    val payFrequency: PayFrequency,
+    val neededPerPaycheck: Double,
+    val savingsPerPaycheck: Double,
+    val projectedMonthlySavings: Double,
+    val projectedAnnualSavings: Double,
+    val isSurplus: Boolean,
+    val deficitPerPaycheck: Double,
+    val fixedNutPercentageOfIncome: Double,
+    val enabledItemsCount: Int,
+    val totalItemsCount: Int,
+    val isCustomized: Boolean
 )
 
 @HiltViewModel
@@ -458,6 +491,212 @@ class DebtsViewModel @Inject constructor(
 
     fun sendTestSpendingAlert() {
         spendingAlertManager.sendTestAlert()
+    }
+
+    // ── Projection & What-If Scenario Sandbox ───────────────────────────────────
+
+    private val customScenarioItems = MutableStateFlow<List<ProjectedScenarioItem>?>(null)
+    private val customProjectedIncome = MutableStateFlow<Double?>(null)
+    private val customProjectedFrequency = MutableStateFlow<PayFrequency?>(null)
+
+    val projectedScenarioItems: StateFlow<List<ProjectedScenarioItem>> =
+        combine(bills, debts, customScenarioItems) { billList, debtList, customItems ->
+            customItems ?: buildDefaultScenarioItems(billList, debtList)
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    val projectedSummary: StateFlow<ProjectedSummary> =
+        combine(
+            projectedScenarioItems,
+            paycheckConfig,
+            wageEstimate,
+            wageConfig,
+            customProjectedIncome,
+            customProjectedFrequency
+        ) { args ->
+            @Suppress("UNCHECKED_CAST")
+            val items = args[0] as List<ProjectedScenarioItem>
+            val config = args[1] as PaycheckConfig
+            val wageEst = args[2] as WageEstimate
+            val wageCfg = args[3] as WageConfig
+            val customIncome = args[4] as? Double
+            val customFreq = args[5] as? PayFrequency
+
+            val defaultIncome = if (wageCfg.autoSyncPaycheckPlanner) {
+                wageEst.effectiveTakeHomePay
+            } else {
+                config.typicalTakeHomePay
+            }
+            val activeIncome = customIncome ?: defaultIncome
+            val activeFreq = customFreq ?: config.frequency
+
+            val totalActualMonthlyNeed = bills.value.sumOf { it.amount } + debts.value.sumOf { it.minimumPayment }
+            val enabledItems = items.filter { it.isEnabled }
+            val totalProjectedMonthlyNeed = enabledItems.sumOf { it.simulatedAmount }
+            val monthlyNeedDelta = totalProjectedMonthlyNeed - totalActualMonthlyNeed
+
+            val annualProjectedNeed = totalProjectedMonthlyNeed * 12.0
+            val neededPerPaycheck = if (activeFreq.paychecksPerYear > 0) {
+                annualProjectedNeed / activeFreq.paychecksPerYear
+            } else {
+                0.0
+            }
+
+            val savingsPerPaycheck = activeIncome - neededPerPaycheck
+            val isSurplus = savingsPerPaycheck >= 0.0
+            val deficitPerPaycheck = if (isSurplus) 0.0 else -savingsPerPaycheck
+
+            val projectedMonthlySavings = (savingsPerPaycheck * activeFreq.paychecksPerYear) / 12.0
+            val projectedAnnualSavings = savingsPerPaycheck * activeFreq.paychecksPerYear
+
+            val monthlyIncome = (activeIncome * activeFreq.paychecksPerYear) / 12.0
+            val fixedNutPercentageOfIncome = if (monthlyIncome > 0.0) {
+                (totalProjectedMonthlyNeed / monthlyIncome) * 100.0
+            } else {
+                0.0
+            }
+
+            val isCustomized = customScenarioItems.value != null ||
+                    customProjectedIncome.value != null ||
+                    customProjectedFrequency.value != null
+
+            ProjectedSummary(
+                totalProjectedMonthlyNeed = totalProjectedMonthlyNeed,
+                totalActualMonthlyNeed = totalActualMonthlyNeed,
+                monthlyNeedDelta = monthlyNeedDelta,
+                projectedIncomePerPaycheck = activeIncome,
+                payFrequency = activeFreq,
+                neededPerPaycheck = neededPerPaycheck,
+                savingsPerPaycheck = savingsPerPaycheck,
+                projectedMonthlySavings = projectedMonthlySavings,
+                projectedAnnualSavings = projectedAnnualSavings,
+                isSurplus = isSurplus,
+                deficitPerPaycheck = deficitPerPaycheck,
+                fixedNutPercentageOfIncome = fixedNutPercentageOfIncome,
+                enabledItemsCount = enabledItems.size,
+                totalItemsCount = items.size,
+                isCustomized = isCustomized
+            )
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = ProjectedSummary(
+                totalProjectedMonthlyNeed = 0.0,
+                totalActualMonthlyNeed = 0.0,
+                monthlyNeedDelta = 0.0,
+                projectedIncomePerPaycheck = 0.0,
+                payFrequency = PayFrequency.BI_WEEKLY,
+                neededPerPaycheck = 0.0,
+                savingsPerPaycheck = 0.0,
+                projectedMonthlySavings = 0.0,
+                projectedAnnualSavings = 0.0,
+                isSurplus = true,
+                deficitPerPaycheck = 0.0,
+                fixedNutPercentageOfIncome = 0.0,
+                enabledItemsCount = 0,
+                totalItemsCount = 0,
+                isCustomized = false
+            )
+        )
+
+    private fun buildDefaultScenarioItems(
+        billList: List<Bill>,
+        debtList: List<Debt>
+    ): List<ProjectedScenarioItem> {
+        val billItems = billList.map { bill ->
+            ProjectedScenarioItem(
+                id = "bill_${bill.id}",
+                name = bill.name,
+                originalAmount = bill.amount,
+                simulatedAmount = bill.amount,
+                type = ObligationType.BILL,
+                dueDayOfMonth = bill.dueDayOfMonth,
+                isEnabled = true,
+                isHypothetical = false
+            )
+        }
+        val debtItems = debtList.map { debt ->
+            ProjectedScenarioItem(
+                id = "debt_${debt.id}",
+                name = debt.name,
+                originalAmount = debt.minimumPayment,
+                simulatedAmount = debt.minimumPayment,
+                type = ObligationType.DEBT,
+                dueDayOfMonth = debt.dueDayOfMonth,
+                isEnabled = true,
+                isHypothetical = false
+            )
+        }
+        return (billItems + debtItems).sortedWith(compareBy({ it.dueDayOfMonth }, { it.name }))
+    }
+
+    private fun ensureCustomScenarioItems(): MutableList<ProjectedScenarioItem> {
+        val current = customScenarioItems.value
+        return if (current != null) {
+            current.toMutableList()
+        } else {
+            buildDefaultScenarioItems(bills.value, debts.value).toMutableList()
+        }
+    }
+
+    fun updateProjectedIncome(newIncome: Double) {
+        customProjectedIncome.value = maxOf(0.0, newIncome)
+    }
+
+    fun updateProjectedFrequency(freq: PayFrequency) {
+        customProjectedFrequency.value = freq
+    }
+
+    fun updateScenarioItemAmount(id: String, newAmount: Double) {
+        val list = ensureCustomScenarioItems()
+        val index = list.indexOfFirst { it.id == id }
+        if (index >= 0) {
+            list[index] = list[index].copy(simulatedAmount = maxOf(0.0, newAmount))
+            customScenarioItems.value = list
+        }
+    }
+
+    fun toggleScenarioItemEnabled(id: String) {
+        val list = ensureCustomScenarioItems()
+        val index = list.indexOfFirst { it.id == id }
+        if (index >= 0) {
+            list[index] = list[index].copy(isEnabled = !list[index].isEnabled)
+            customScenarioItems.value = list
+        }
+    }
+
+    fun addHypotheticalItem(name: String, amount: Double, type: ObligationType, dueDay: Int = 1) {
+        val list = ensureCustomScenarioItems()
+        list.add(
+            ProjectedScenarioItem(
+                id = "hypo_${UUID.randomUUID()}",
+                name = name.ifBlank { "Hypothetical Expense" },
+                originalAmount = 0.0,
+                simulatedAmount = maxOf(0.0, amount),
+                type = type,
+                dueDayOfMonth = dueDay.coerceIn(1, 31),
+                isEnabled = true,
+                isHypothetical = true
+            )
+        )
+        customScenarioItems.value = list
+    }
+
+    fun removeHypotheticalItem(id: String) {
+        val list = ensureCustomScenarioItems()
+        val removed = list.removeAll { it.id == id }
+        if (removed) {
+            customScenarioItems.value = list
+        }
+    }
+
+    fun resetScenarioToActuals() {
+        customScenarioItems.value = null
+        customProjectedIncome.value = null
+        customProjectedFrequency.value = null
     }
 }
 
