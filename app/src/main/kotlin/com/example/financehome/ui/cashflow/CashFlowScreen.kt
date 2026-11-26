@@ -66,6 +66,7 @@ fun CashFlowScreen(
 
     val bills by viewModel.bills.collectAsState()
     val debts by viewModel.debts.collectAsState()
+    val occurrences by viewModel.occurrences.collectAsState()
     val paycheckBreakdown by viewModel.paycheckBreakdown.collectAsState()
     val paycheckConfig by viewModel.paycheckConfig.collectAsState()
     val wageConfig by viewModel.wageConfig.collectAsState()
@@ -180,6 +181,7 @@ fun CashFlowScreen(
                             CashFlowCalendarCard(
                                 bills = bills,
                                 debts = debts,
+                                occurrences = occurrences,
                                 paycheckConfig = paycheckConfig,
                                 breakdown = paycheckBreakdown,
                                 safeToSpendStatus = safeToSpendStatus,
@@ -814,6 +816,7 @@ fun CashFlowHoursRow(
 fun CashFlowCalendarCard(
     bills: List<Bill>,
     debts: List<Debt>,
+    occurrences: List<com.example.financehome.data.model.BillOccurrenceEntity> = emptyList(),
     paycheckConfig: PaycheckConfig,
     breakdown: PaycheckBreakdown,
     safeToSpendStatus: SafeToSpendStatus,
@@ -826,6 +829,10 @@ fun CashFlowCalendarCard(
 ) {
     var displayedMonth by remember { mutableStateOf(YearMonth.now()) }
     var selectedDay by remember { mutableStateOf<Int?>(LocalDate.now().dayOfMonth) }
+
+    val paidEpochDays = remember(occurrences) {
+        occurrences.filter { it.isPaid }.map { it.dueDateEpochDay }.toSet()
+    }
 
     val anchorDate = LocalDate.ofEpochDay(paycheckConfig.anchorPayDateEpochDay)
     val payDays = remember(displayedMonth, anchorDate, paycheckConfig.frequency) {
@@ -992,9 +999,14 @@ fun CashFlowCalendarCard(
                         val dayNumber = cellIndex - firstDayOfWeek + 1
 
                         if (dayNumber in 1..daysInMonth) {
+                            val dayDate = displayedMonth.atDay(dayNumber)
                             val isPayday = payDays.contains(dayNumber)
                             val hasBills = billDays.containsKey(dayNumber)
                             val hasDebts = debtDays.containsKey(dayNumber)
+                            val thisDayBills = billDays[dayNumber] ?: emptyList()
+                            val isAllBillsPaid = thisDayBills.isNotEmpty() && thisDayBills.all {
+                                paidEpochDays.contains(dayDate.toEpochDay()) || it.isPaidForDate(dayDate)
+                            }
                             val isSelected = selectedDay == dayNumber
                             val isToday = displayedMonth == YearMonth.now() && dayNumber == LocalDate.now().dayOfMonth
 
@@ -1006,6 +1018,7 @@ fun CashFlowCalendarCard(
                                         when {
                                             isSelected -> MaterialTheme.colorScheme.primary
                                             isToday -> MaterialTheme.colorScheme.primaryContainer
+                                            isAllBillsPaid -> ColorIncome.copy(alpha = 0.18f)
                                             else -> androidx.compose.ui.graphics.Color.Transparent
                                         }
                                     )
@@ -1016,10 +1029,11 @@ fun CashFlowCalendarCard(
                                     Text(
                                         text = "$dayNumber",
                                         style = MaterialTheme.typography.bodySmall.copy(
-                                            fontWeight = if (isSelected || isToday || isPayday) FontWeight.Bold else FontWeight.Normal,
+                                            fontWeight = if (isSelected || isToday || isPayday || isAllBillsPaid) FontWeight.Bold else FontWeight.Normal,
                                             color = when {
                                                 isSelected -> MaterialTheme.colorScheme.onPrimary
                                                 isToday -> MaterialTheme.colorScheme.primary
+                                                isAllBillsPaid -> ColorIncome
                                                 else -> MaterialTheme.colorScheme.onSurface
                                             }
                                         )
@@ -1030,7 +1044,10 @@ fun CashFlowCalendarCard(
                                             Box(modifier = Modifier.size(4.dp).clip(CircleShape).background(if (isSelected) MaterialTheme.colorScheme.onPrimary else ColorIncome))
                                         }
                                         if (hasBills) {
-                                            Box(modifier = Modifier.size(4.dp).clip(CircleShape).background(if (isSelected) MaterialTheme.colorScheme.onPrimary else ColorWarning))
+                                            val billDotColor = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                                                else if (isAllBillsPaid) ColorIncome
+                                                else ColorWarning
+                                            Box(modifier = Modifier.size(4.dp).clip(CircleShape).background(billDotColor))
                                         }
                                         if (hasDebts) {
                                             Box(modifier = Modifier.size(4.dp).clip(CircleShape).background(if (isSelected) MaterialTheme.colorScheme.onPrimary else ColorExpense))
@@ -1117,7 +1134,7 @@ fun CashFlowCalendarCard(
 
                     dayBills.forEach { bill ->
                         val billDueDate = displayedMonth.atDay(day)
-                        val isPaid = bill.isPaidForDate(billDueDate)
+                        val isPaid = paidEpochDays.contains(billDueDate.toEpochDay()) || bill.isPaidForDate(billDueDate)
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1139,13 +1156,31 @@ fun CashFlowCalendarCard(
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Column {
-                                    Text(
-                                        text = bill.name,
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            fontWeight = FontWeight.SemiBold,
-                                            textDecoration = if (isPaid) TextDecoration.LineThrough else TextDecoration.None
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = bill.name,
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                fontWeight = FontWeight.SemiBold,
+                                                textDecoration = if (isPaid) TextDecoration.LineThrough else TextDecoration.None
+                                            )
                                         )
-                                    )
+                                        if (isPaid) {
+                                            Surface(
+                                                color = ColorIncome.copy(alpha = 0.15f),
+                                                shape = RoundedCornerShape(4.dp)
+                                            ) {
+                                                Text(
+                                                    text = "PAID",
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                                                    color = ColorIncome,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                )
+                                            }
+                                        }
+                                    }
                                     Text(
                                         text = "Bill • ${bill.category}",
                                         style = MaterialTheme.typography.labelSmall,
@@ -1216,6 +1251,7 @@ fun CashFlowCalendarCard(
                 breakdown = breakdown,
                 safeToSpendStatus = safeToSpendStatus,
                 currencyFormat = currencyFormat,
+                occurrences = occurrences,
                 onToggleObligationPaid = onToggleObligationPaid
             )
         }
@@ -1231,6 +1267,7 @@ fun ForwardPaycheckScheduleSection(
     breakdown: PaycheckBreakdown,
     safeToSpendStatus: SafeToSpendStatus,
     currencyFormat: NumberFormat,
+    occurrences: List<com.example.financehome.data.model.BillOccurrenceEntity> = emptyList(),
     onToggleObligationPaid: (UpcomingObligationItem) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1422,6 +1459,9 @@ fun ForwardPaycheckScheduleSection(
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 activePeriod.obligations.forEach { item ->
+                                    val isItemPaid = item.isPaid || occurrences.any {
+                                        it.billId == item.id && it.dueDateEpochDay == item.dueDate.toEpochDay() && it.isPaid
+                                    }
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -1453,7 +1493,7 @@ fun ForwardPaycheckScheduleSection(
                                                         text = item.name,
                                                         style = MaterialTheme.typography.bodyMedium.copy(
                                                             fontWeight = FontWeight.SemiBold,
-                                                            textDecoration = if (item.isPaid) TextDecoration.LineThrough else null
+                                                            textDecoration = if (isItemPaid) TextDecoration.LineThrough else null
                                                         ),
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis
@@ -1488,7 +1528,7 @@ fun ForwardPaycheckScheduleSection(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
-                                            if (item.isPaid) {
+                                            if (isItemPaid) {
                                                 Surface(
                                                     shape = RoundedCornerShape(4.dp),
                                                     color = ColorIncome.copy(alpha = 0.15f)
@@ -1508,7 +1548,7 @@ fun ForwardPaycheckScheduleSection(
                                                 text = currencyFormat.format(item.amount),
                                                 style = MaterialTheme.typography.bodyMedium.copy(
                                                     fontWeight = FontWeight.Bold,
-                                                    color = if (item.isPaid) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
+                                                    color = if (isItemPaid) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
                                                 ),
                                                 maxLines = 1,
                                                 softWrap = false,

@@ -3,7 +3,12 @@ package com.example.financehome.data.repository
 import android.content.Context
 import android.content.SharedPreferences
 import com.example.financehome.data.local.BillDao
+import com.example.financehome.data.local.BillOccurrenceDao
+import com.example.financehome.data.local.MerchantBillRuleDao
 import com.example.financehome.data.model.Bill
+import com.example.financehome.data.model.BillOccurrenceEntity
+import com.example.financehome.data.model.MerchantBillRuleEntity
+import com.example.financehome.domain.MerchantNormalizer
 import com.example.financehome.domain.PayFrequency
 import com.example.financehome.domain.PaycheckConfig
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -11,13 +16,18 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.time.LocalDate
+import java.time.YearMonth
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.math.abs
 
 @Singleton
 class BillRepository @Inject constructor(
     private val billDao: BillDao,
+    private val billOccurrenceDao: BillOccurrenceDao,
+    private val merchantBillRuleDao: MerchantBillRuleDao,
     @ApplicationContext private val context: Context
 ) {
     private val prefs: SharedPreferences =
@@ -33,6 +43,11 @@ class BillRepository @Inject constructor(
     val paycheckConfig = _paycheckConfig.asStateFlow()
 
     fun getAllBills(): Flow<List<Bill>> = billDao.getAllBills()
+
+    val allOccurrences: Flow<List<BillOccurrenceEntity>> = billOccurrenceDao.getAllOccurrences()
+
+    suspend fun getOccurrencesForBill(billId: String): Flow<List<BillOccurrenceEntity>> =
+        billOccurrenceDao.getOccurrencesForBill(billId)
 
     suspend fun addBill(
         name: String,
@@ -60,14 +75,104 @@ class BillRepository @Inject constructor(
 
     suspend fun deleteBill(bill: Bill) = billDao.deleteBill(bill)
 
+    /**
+     * Toggles the paid status of a single bill occurrence for [targetDate].
+     * Marks ONLY that single occurrence as paid/unpaid, keeping subsequent cycles projected as unpaid.
+     */
+    suspend fun toggleOccurrencePaid(
+        bill: Bill,
+        targetDate: LocalDate,
+        matchedTxId: String? = null,
+        currentDate: LocalDate = LocalDate.now()
+    ) {
+        val existing = billOccurrenceDao.getOccurrence(bill.id, targetDate.toEpochDay())
+        val willBePaid = !(existing?.isPaid ?: false)
+        val occurrence = BillOccurrenceEntity(
+            billId = bill.id,
+            dueDateEpochDay = targetDate.toEpochDay(),
+            isPaid = willBePaid,
+            paidDateEpochDay = if (willBePaid) currentDate.toEpochDay() else null,
+            matchedTransactionId = if (willBePaid) matchedTxId else null,
+            amount = bill.amount
+        )
+        billOccurrenceDao.upsertOccurrence(occurrence)
+
+        // Keep bill.isPaidThisMonth in sync if targetDate falls in current month
+        if (targetDate.year == currentDate.year && targetDate.monthValue == currentDate.monthValue) {
+            billDao.markPaid(bill.id, willBePaid, if (willBePaid) System.currentTimeMillis() else null)
+        }
+    }
+
     suspend fun toggleBillPaid(bill: Bill, targetDate: LocalDate? = null, currentDate: LocalDate = LocalDate.now()) {
         val dueToToggle = targetDate ?: bill.getEffectiveNextDueDate(currentDate)
-        val isSettled = bill.isPaidForDate(dueToToggle, currentDate)
-        if (isSettled) {
-            unmarkBillPaid(bill, dueToToggle, currentDate)
-        } else {
-            markBillPaidForCycle(bill, dueToToggle, currentDate)
+        toggleOccurrencePaid(bill, dueToToggle, currentDate = currentDate)
+    }
+
+    suspend fun saveMerchantRule(normalizedMerchant: String, billId: String, isDebt: Boolean = false) {
+        merchantBillRuleDao.upsertRule(
+            MerchantBillRuleEntity(
+                normalizedMerchant = normalizedMerchant,
+                billId = billId,
+                isDebt = isDebt
+            )
+        )
+    }
+
+    fun getAllMerchantRules(): Flow<List<MerchantBillRuleEntity>> = merchantBillRuleDao.getAllRules()
+
+    /**
+     * Matches an incoming transaction against saved merchant rules and marks the nearest
+     * unpaid bill occurrence (within +-10 days) as paid.
+     */
+    suspend fun matchAndSettleOccurrence(
+        merchant: String,
+        txAmount: Double,
+        txDate: LocalDate,
+        txId: String
+    ): Pair<Bill, BillOccurrenceEntity>? {
+        val normalized = MerchantNormalizer.normalize(merchant)
+        val rules = merchantBillRuleDao.getAllRulesList()
+        val rule = rules.firstOrNull { it.normalizedMerchant == normalized }
+            ?: rules.firstOrNull { normalized.contains(it.normalizedMerchant) || it.normalizedMerchant.contains(normalized) }
+            ?: return null
+
+        if (rule.isDebt) return null
+        val bill = billDao.getBillById(rule.billId) ?: return null
+
+        // Look for candidate due dates in previous, current, and next month
+        val candidateMonths = listOf(
+            YearMonth.from(txDate).minusMonths(1),
+            YearMonth.from(txDate),
+            YearMonth.from(txDate).plusMonths(1)
+        )
+        val candidateDueDates = candidateMonths.map { ym ->
+            ym.atDay(minOf(bill.dueDayOfMonth, ym.lengthOfMonth()))
         }
+
+        val nearestDueDate = candidateDueDates
+            .map { date -> Pair(date, abs(ChronoUnit.DAYS.between(txDate, date))) }
+            .filter { it.second <= 10L }
+            .minByOrNull { it.second }
+            ?.first ?: return null
+
+        val existingOcc = billOccurrenceDao.getOccurrence(bill.id, nearestDueDate.toEpochDay())
+        if (existingOcc == null || !existingOcc.isPaid) {
+            val occurrence = BillOccurrenceEntity(
+                billId = bill.id,
+                dueDateEpochDay = nearestDueDate.toEpochDay(),
+                isPaid = true,
+                paidDateEpochDay = txDate.toEpochDay(),
+                matchedTransactionId = txId,
+                amount = txAmount
+            )
+            billOccurrenceDao.upsertOccurrence(occurrence)
+            if (nearestDueDate.year == txDate.year && nearestDueDate.monthValue == txDate.monthValue) {
+                billDao.markPaid(bill.id, true, System.currentTimeMillis())
+            }
+            return Pair(bill, occurrence)
+        }
+
+        return null
     }
 
     suspend fun markBillPaidForCycle(

@@ -29,6 +29,8 @@ import com.example.financehome.data.model.Bill
 import com.example.financehome.data.model.ReceiptItem
 import com.example.financehome.data.model.Transaction
 import com.example.financehome.data.model.TransactionType
+import com.example.financehome.domain.MultiMonthOutlookResult
+import com.example.financehome.domain.OutlookStatusLevel
 import com.example.financehome.domain.SafeToSpendAlertLevel
 import com.example.financehome.domain.SafeToSpendStatus
 import com.example.financehome.ui.analytics.AnalyticsScreen
@@ -320,6 +322,14 @@ fun DashboardScreen(
                             UnifiedMonthlyHeroCard(
                                 outlook = monthlyOutlook,
                                 currencyFormat = currencyFormat,
+                                onPreviousMonth = {
+                                    if (monthlyOutlook.monthOffset > 0) {
+                                        viewModel.selectMonthOffset(monthlyOutlook.monthOffset - 1)
+                                    }
+                                },
+                                onNextMonth = {
+                                    viewModel.selectMonthOffset(monthlyOutlook.monthOffset + 1)
+                                },
                                 onToggleBillPaid = { bill, date -> viewModel.toggleBillPaid(bill, date) },
                                 onNavigateToCashFlow = { onNavigateToCashFlow(false) }
                             )
@@ -795,6 +805,8 @@ fun DashboardScreen(
 fun UnifiedMonthlyHeroCard(
     outlook: DashboardMonthlyOutlook,
     currencyFormat: NumberFormat,
+    onPreviousMonth: () -> Unit = {},
+    onNextMonth: () -> Unit = {},
     onToggleBillPaid: (Bill, LocalDate) -> Unit,
     onNavigateToCashFlow: () -> Unit,
     modifier: Modifier = Modifier
@@ -834,17 +846,49 @@ fun UnifiedMonthlyHeroCard(
                 .fillMaxWidth()
                 .padding(18.dp)
         ) {
-            // ── Tier A: Top Header ─────────────────────────────────────────────
+            // ── Tier A: Top Header with Month Switcher ──────────────────────────
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Projected End-of-Month Balance",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                // Month Switcher: < MMMM yyyy >
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    IconButton(
+                        onClick = onPreviousMonth,
+                        enabled = outlook.monthOffset > 0,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ChevronLeft,
+                            contentDescription = "Previous Month",
+                            tint = if (outlook.monthOffset > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    val monthFormatter = java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)
+                    Text(
+                        text = outlook.selectedYearMonth.format(monthFormatter),
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    IconButton(
+                        onClick = onNextMonth,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ChevronRight,
+                            contentDescription = "Next Month",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
 
                 Surface(
                     color = statusBadgeColor,
@@ -872,6 +916,12 @@ fun UnifiedMonthlyHeroCard(
 
             Spacer(modifier = Modifier.height(4.dp))
 
+            Text(
+                text = if (outlook.monthOffset == 0) "Projected End-of-Month Buffer" else "Projected End Buffer (${outlook.selectedYearMonth.month.name.lowercase().replaceFirstChar { it.uppercase() }})",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
             // Primary Projected Balance with Tabular Figures
             Text(
                 text = currencyFormat.format(outlook.projectedEndOfMonthBalance),
@@ -884,7 +934,7 @@ fun UnifiedMonthlyHeroCard(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Current Available Balance Sub-label
+            // Current Available / Rollover Buffer Sub-label
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -896,8 +946,9 @@ fun UnifiedMonthlyHeroCard(
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(15.dp)
                 )
+                val bufferLabel = if (outlook.monthOffset == 0) "Current Available Buffer" else "Rollover from Prior Month"
                 Text(
-                    text = "Current Available Balance: ${currencyFormat.format(outlook.currentAvailableBalance)}",
+                    text = "$bufferLabel: ${currencyFormat.format(outlook.currentAvailableBalance)}",
                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

@@ -1,6 +1,7 @@
 package com.example.financehome.domain
 
 import com.example.financehome.data.model.Bill
+import com.example.financehome.data.model.BillOccurrenceEntity
 import com.example.financehome.data.model.Debt
 import com.example.financehome.data.model.DebtType
 import org.junit.Assert.*
@@ -95,13 +96,16 @@ class PaycheckCalculatorTest {
 
     @Test
     fun testThreePaycheckMonthsDetection() {
-        // Any 26-paycheck schedule in a normal 365-day year has exactly 2 three-paycheck months
         val anchor = LocalDate.of(2026, 1, 2)
         val threePayMonths = PaycheckCalculator.findThreePaycheckMonths(2026, anchor)
 
-        assertEquals("Should have exactly 2 three-paycheck months in a calendar year", 2, threePayMonths.size)
+        // In 2026, January (2, 16, 30) and July (2, 17, 31) have 3 paydays.
+        // Additionally, Jan 1, 2027 is New Year's Day (holiday), shifting that payday to Dec 31, 2026,
+        // which makes December 2026 also have 3 paydays (Dec 4, 18, 31).
+        assertEquals(3, threePayMonths.size)
         assertTrue(threePayMonths.contains("January 2026"))
         assertTrue(threePayMonths.contains("July 2026"))
+        assertTrue(threePayMonths.contains("December 2026"))
     }
 
     @Test
@@ -646,5 +650,103 @@ class PaycheckCalculatorTest {
         assertEquals(100.0, breakdownAfter.windowObligationsTotal, 0.01)
         assertEquals(0.0, breakdownAfter.unpaidWindowObligationsTotal, 0.01)
     }
+
+    @Test
+    fun testEffectivePayDatesWithHolidayShifting() {
+        // Bi-weekly schedule anchored at Jan 1, 2021 (which is Friday New Year's Day)
+        // Bank holiday adjustment should shift Jan 1, 2021 to Thursday Dec 31, 2020!
+        // Therefore, December 2020 should contain this shifted payday (Dec 31),
+        // and January 2021 should NOT have Jan 1.
+        val anchor = LocalDate.of(2021, 1, 1)
+
+        val dec2020PayDates = PaycheckCalculator.getEffectivePayDatesForMonth(
+            year = 2020,
+            month = 12,
+            anchorPayDate = anchor,
+            frequency = PayFrequency.BI_WEEKLY
+        )
+        assertTrue("Dec 2020 should contain Dec 31 (shifted from Jan 1)", dec2020PayDates.contains(LocalDate.of(2020, 12, 31)))
+
+        val jan2021PayDates = PaycheckCalculator.getEffectivePayDatesForMonth(
+            year = 2021,
+            month = 1,
+            anchorPayDate = anchor,
+            frequency = PayFrequency.BI_WEEKLY
+        )
+        assertFalse("Jan 2021 should not contain Jan 1 because it shifted to Dec 31", jan2021PayDates.contains(LocalDate.of(2021, 1, 1)))
+        // Next bi-weekly pay is Jan 15
+        assertTrue("Jan 2021 should contain Jan 15", jan2021PayDates.contains(LocalDate.of(2021, 1, 15)))
+    }
+
+    @Test
+    fun testMultiMonthOutlookBufferRolloverMonth1vsMonth2() {
+        // Today is Nov 20, 2026
+        val today = LocalDate.of(2026, 11, 20)
+        // Bi-weekly pay on Fridays: Nov 13, Nov 27, Dec 11, Dec 25 (shifted to Dec 24 due to Christmas)
+        val config = PaycheckConfig(
+            frequency = PayFrequency.BI_WEEKLY,
+            typicalTakeHomePay = 2000.0,
+            anchorPayDateEpochDay = LocalDate.of(2026, 11, 13).toEpochDay()
+        )
+
+        // Bills:
+        // Rent: $1200 on 1st
+        // Electric: $150 on 10th
+        // Water: $100 on 25th
+        val bills = listOf(
+            Bill("b1", "Rent", 1200.0, 1, "Housing", nextDueDateEpochDay = LocalDate.of(2026, 12, 1).toEpochDay()),
+            Bill("b2", "Electric", 150.0, 10, "Utilities", nextDueDateEpochDay = LocalDate.of(2026, 12, 10).toEpochDay()),
+            Bill("b3", "Water", 100.0, 25, "Utilities", nextDueDateEpochDay = LocalDate.of(2026, 11, 25).toEpochDay())
+        )
+
+        val currentBalance = 1500.0
+
+        // Month 0 (Current Month: November 2026)
+        // Paydays in Nov 2026: Nov 13, Nov 27
+        // Nov 13 is before today (Nov 20), so it is already in currentBalance.
+        // Remaining unreceived paychecks in Nov: 1 (Nov 27) -> $2000.0
+        // Unpaid bills remaining in Nov: Water ($100 on Nov 25)
+        // Rent (Dec 1) and Electric (Dec 10) are in Dec.
+        // Expected projectedEndOfMonthBuffer = currentBalance (1500) + remainingPay (2000) - remainingBills (100) = 3400.0
+        val month0Outlook = PaycheckCalculator.calculateMultiMonthOutlook(
+            currentBalance = currentBalance,
+            bills = bills,
+            debts = emptyList(),
+            config = config,
+            takeHomePay = 2000.0,
+            targetMonthOffset = 0,
+            currentDate = today
+        )
+
+        assertEquals(java.time.YearMonth.of(2026, 11), month0Outlook.targetYearMonth)
+        assertEquals(0, month0Outlook.monthOffset)
+        assertEquals(currentBalance, month0Outlook.startingBalance, 0.01)
+        assertEquals(2000.0, month0Outlook.expectedInflows, 0.01) // Only remaining paycheck!
+        assertEquals(100.0, month0Outlook.remainingBills, 0.01) // Only remaining unpaid bill!
+        assertEquals(3400.0, month0Outlook.projectedEndOfMonthBuffer, 0.01)
+
+        // Month 1 (Future Month: December 2026)
+        // Rollover buffer from Month 0 = 3400.0
+        // Scheduled paydays in Dec: Dec 11 ($2000) and Dec 24/25 ($2000) -> Total $4000.0
+        // Scheduled bills in Dec: Rent ($1200) + Electric ($150) + Water ($100) = $1450.0
+        // Expected projectedEndOfMonthBuffer = 3400.0 + 4000.0 - 1450.0 = 5950.0
+        val month1Outlook = PaycheckCalculator.calculateMultiMonthOutlook(
+            currentBalance = currentBalance,
+            bills = bills,
+            debts = emptyList(),
+            config = config,
+            takeHomePay = 2000.0,
+            targetMonthOffset = 1,
+            currentDate = today
+        )
+
+        assertEquals(java.time.YearMonth.of(2026, 12), month1Outlook.targetYearMonth)
+        assertEquals(1, month1Outlook.monthOffset)
+        assertEquals(3400.0, month1Outlook.startingBalance, 0.01)
+        assertEquals(4000.0, month1Outlook.expectedInflows, 0.01)
+        assertEquals(1450.0, month1Outlook.remainingBills, 0.01)
+        assertEquals(5950.0, month1Outlook.projectedEndOfMonthBuffer, 0.01)
+    }
 }
+
 

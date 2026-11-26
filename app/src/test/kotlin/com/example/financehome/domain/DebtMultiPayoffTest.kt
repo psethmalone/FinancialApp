@@ -1,4 +1,4 @@
-﻿package com.example.financehome.domain
+package com.example.financehome.domain
 
 import com.example.financehome.data.model.Debt
 import com.example.financehome.data.model.DebtType
@@ -129,7 +129,8 @@ class DebtMultiPayoffTest {
 
         assertEquals(2, payDays.size)
         assertTrue(payDays.contains(1))
-        assertTrue(payDays.contains(16))
+        // May 16, 2026 is Saturday -> shifts to Friday May 15
+        assertTrue(payDays.contains(15))
     }
 
     @Test
@@ -144,6 +145,7 @@ class DebtMultiPayoffTest {
         )
 
         assertEquals(1, payDays.size)
-        assertTrue(payDays.contains(15))
+        // August 15, 2026 is Saturday -> shifts to Friday August 14
+        assertTrue(payDays.contains(14))
     }
 }

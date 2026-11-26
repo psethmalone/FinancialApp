@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.financehome.domain.CategorySlice
@@ -38,8 +39,42 @@ fun DonutPieChart(
 ) {
     var selectedSlice by remember { mutableStateOf<CategorySlice?>(null) }
 
+    // Pre-aggregate slices under 3% into "Other"
+    val displaySlices = remember(slices) {
+        if (slices.isEmpty()) emptyList()
+        else {
+            val major = mutableListOf<CategorySlice>()
+            var otherAmt = 0.0
+            var otherCount = 0
+            var otherPct = 0.0
+
+            slices.forEach { slice ->
+                if (slice.percentage < 3.0) {
+                    otherAmt += slice.amount
+                    otherCount += slice.transactionCount
+                    otherPct += slice.percentage
+                } else {
+                    major.add(slice)
+                }
+            }
+
+            if (otherAmt > 0.0) {
+                major.add(
+                    CategorySlice(
+                        category = "Other",
+                        amount = otherAmt,
+                        percentage = otherPct,
+                        color = Color(0xFF9E9E9E),
+                        transactionCount = otherCount
+                    )
+                )
+            }
+            major
+        }
+    }
+
     // Reset selection if slices change
-    LaunchedEffect(slices) {
+    LaunchedEffect(displaySlices) {
         selectedSlice = null
     }
 
@@ -47,11 +82,11 @@ fun DonutPieChart(
         modifier = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        if (slices.isEmpty() || totalAmount <= 0.0) {
+        if (displaySlices.isEmpty() || totalAmount <= 0.0) {
             Box(
                 modifier = Modifier
-                    .size(200.dp)
-                    .padding(16.dp),
+                    .size(180.dp)
+                    .padding(8.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -62,24 +97,25 @@ fun DonutPieChart(
                 )
             }
         } else {
-            // Interactive Donut Chart Canvas
+            // Interactive Donut Chart Canvas constrained in a 180dp aspect-ratio box
             Box(
                 modifier = Modifier
-                    .size(220.dp)
-                    .padding(12.dp),
+                    .size(180.dp)
+                    .padding(8.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Canvas(
                     modifier = Modifier
                         .fillMaxSize()
-                        .pointerInput(slices) {
+                        .pointerInput(displaySlices) {
                             detectTapGestures { offset ->
                                 val center = Offset(size.width / 2f, size.height / 2f)
                                 val dx = offset.x - center.x
                                 val dy = offset.y - center.y
                                 val dist = kotlin.math.sqrt(dx * dx + dy * dy)
                                 val radius = size.width / 2f
-                                val innerRadius = radius * 0.65f
+                                val strokeW = size.width * 0.18f
+                                val innerRadius = radius - strokeW
 
                                 if (dist in innerRadius..radius) {
                                     // Angle in degrees from 0 to 360 starting from -90 (top)
@@ -88,7 +124,7 @@ fun DonutPieChart(
 
                                     var currentAngle = 0f
                                     var found: CategorySlice? = null
-                                    for (slice in slices) {
+                                    for (slice in displaySlices) {
                                         val sweep = (slice.percentage.toFloat() / 100f) * 360f
                                         if (touchAngle >= currentAngle && touchAngle <= currentAngle + sweep) {
                                             found = slice
@@ -109,9 +145,9 @@ fun DonutPieChart(
                     val arcSize = Size(chartRadius * 2f, chartRadius * 2f)
 
                     var startAngle = -90f
-                    val gapAngle = if (slices.size > 1) 2f else 0f
+                    val gapAngle = if (displaySlices.size > 1) 2f else 0f
 
-                    for (slice in slices) {
+                    for (slice in displaySlices) {
                         val totalSweep = (slice.percentage.toFloat() / 100f) * 360f
                         val actualSweep = maxOf(0.5f, totalSweep - gapAngle)
 
@@ -133,11 +169,11 @@ fun DonutPieChart(
                     }
                 }
 
-                // Center Content
+                // Center Content (Total or selected category details)
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
-                    modifier = Modifier.padding(horizontal = 24.dp)
+                    modifier = Modifier.padding(horizontal = 16.dp)
                 ) {
                     val currentDisplaySlice = selectedSlice
                     if (currentDisplaySlice != null) {
@@ -145,12 +181,14 @@ fun DonutPieChart(
                             text = currentDisplaySlice.category,
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                             color = currentDisplaySlice.color,
-                            maxLines = 1
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Text(
                             text = currencyFormat.format(currentDisplaySlice.amount),
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            maxLines = 1
+                            maxLines = 1,
+                            softWrap = false
                         )
                         Text(
                             text = String.format(Locale.US, "%.1f%%", currentDisplaySlice.percentage),
@@ -165,11 +203,12 @@ fun DonutPieChart(
                         )
                         Text(
                             text = currencyFormat.format(totalAmount),
-                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                            maxLines = 1
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            maxLines = 1,
+                            softWrap = false
                         )
                         Text(
-                            text = "${slices.size} categories",
+                            text = "${displaySlices.size} categories",
                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                             color = MaterialTheme.colorScheme.outline
                         )
@@ -184,7 +223,7 @@ fun DonutPieChart(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                slices.forEach { slice ->
+                displaySlices.forEach { slice ->
                     val isSelected = selectedSlice == slice
                     Surface(
                         shape = RoundedCornerShape(10.dp),
@@ -205,7 +244,8 @@ fun DonutPieChart(
                             ) {
                                 Row(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f, fill = false)
                                 ) {
                                     Box(
                                         modifier = Modifier
@@ -222,7 +262,9 @@ fun DonutPieChart(
                                         text = slice.category,
                                         style = MaterialTheme.typography.bodyMedium.copy(
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                        )
+                                        ),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = "(${slice.transactionCount})",
@@ -237,7 +279,8 @@ fun DonutPieChart(
                                 ) {
                                     Text(
                                         text = currencyFormat.format(slice.amount),
-                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                        maxLines = 1
                                     )
                                     Text(
                                         text = String.format(Locale.US, "%.1f%%", slice.percentage),

@@ -313,6 +313,82 @@ object PaycheckCalculator {
     }
 
     /**
+     * Returns the list of effective LocalDate paydays in the given year and month,
+     * adjusting for US Federal Reserve bank holidays and weekends (shifting backward to preceding banking business day).
+     */
+    fun getEffectivePayDatesForMonth(
+        year: Int,
+        month: Int,
+        anchorPayDate: LocalDate,
+        frequency: PayFrequency
+    ): List<LocalDate> {
+        val monthStart = LocalDate.of(year, month, 1)
+        val monthEnd = monthStart.withDayOfMonth(monthStart.lengthOfMonth())
+        val effectivePayDates = mutableListOf<LocalDate>()
+
+        when (frequency) {
+            PayFrequency.WEEKLY, PayFrequency.BI_WEEKLY -> {
+                val step = if (frequency == PayFrequency.WEEKLY) 7L else 14L
+                val searchStart = monthStart.minusDays(14)
+                val searchEnd = monthEnd.plusDays(14)
+
+                val diff = searchStart.toEpochDay() - anchorPayDate.toEpochDay()
+                val rem = Math.floorMod(diff, step)
+                val firstEpoch = if (rem == 0L) searchStart.toEpochDay() else searchStart.toEpochDay() + (step - rem)
+                var cursor = LocalDate.ofEpochDay(firstEpoch)
+
+                while (!cursor.isAfter(searchEnd)) {
+                    val effective = BankHolidayUtil.adjustPayDateForBankHoliday(cursor)
+                    if (effective.year == year && effective.monthValue == month) {
+                        effectivePayDates.add(effective)
+                    }
+                    cursor = cursor.plusDays(step)
+                }
+            }
+            PayFrequency.SEMI_MONTHLY -> {
+                val searchMonths = listOf(
+                    YearMonth.of(year, month).minusMonths(1),
+                    YearMonth.of(year, month),
+                    YearMonth.of(year, month).plusMonths(1)
+                )
+                val anchorDay = anchorPayDate.dayOfMonth
+                val d1Day = if (anchorDay <= 15) anchorDay else (anchorDay - 15).coerceAtLeast(1)
+                val d2Day = d1Day + 15
+
+                for (ym in searchMonths) {
+                    val len = ym.lengthOfMonth()
+                    val candidate1 = ym.atDay(minOf(d1Day, len))
+                    val candidate2 = ym.atDay(minOf(d2Day, len))
+
+                    for (cand in listOf(candidate1, candidate2)) {
+                        val effective = BankHolidayUtil.adjustPayDateForBankHoliday(cand)
+                        if (effective.year == year && effective.monthValue == month) {
+                            effectivePayDates.add(effective)
+                        }
+                    }
+                }
+            }
+            PayFrequency.MONTHLY -> {
+                val searchMonths = listOf(
+                    YearMonth.of(year, month).minusMonths(1),
+                    YearMonth.of(year, month),
+                    YearMonth.of(year, month).plusMonths(1)
+                )
+                for (ym in searchMonths) {
+                    val len = ym.lengthOfMonth()
+                    val cand = ym.atDay(minOf(anchorPayDate.dayOfMonth, len))
+                    val effective = BankHolidayUtil.adjustPayDateForBankHoliday(cand)
+                    if (effective.year == year && effective.monthValue == month) {
+                        effectivePayDates.add(effective)
+                    }
+                }
+            }
+        }
+
+        return effectivePayDates.distinct().sorted()
+    }
+
+    /**
      * Returns the set of day-of-month numbers (1..31) that are paydays in the given year and month.
      */
     fun getPayDatesForMonth(
@@ -321,41 +397,14 @@ object PaycheckCalculator {
         anchorPayDate: LocalDate,
         frequency: PayFrequency
     ): Set<Int> {
-        val monthStart = LocalDate.of(year, month, 1)
-        val monthEnd = monthStart.withDayOfMonth(monthStart.lengthOfMonth())
-        val payDays = mutableSetOf<Int>()
-
-        when (frequency) {
-            PayFrequency.WEEKLY, PayFrequency.BI_WEEKLY -> {
-                val step = if (frequency == PayFrequency.WEEKLY) 7L else 14L
-                val diff = monthStart.toEpochDay() - anchorPayDate.toEpochDay()
-                val rem = Math.floorMod(diff, step)
-                val firstEpoch = if (rem == 0L) monthStart.toEpochDay() else monthStart.toEpochDay() + (step - rem)
-                var cursor = LocalDate.ofEpochDay(firstEpoch)
-                while (!cursor.isAfter(monthEnd)) {
-                    if (cursor.monthValue == month && cursor.year == year) {
-                        payDays.add(cursor.dayOfMonth)
-                    }
-                    cursor = cursor.plusDays(step)
-                }
-            }
-            PayFrequency.SEMI_MONTHLY -> {
-                val anchorDay = anchorPayDate.dayOfMonth
-                val d1 = if (anchorDay <= 15) anchorDay else (anchorDay - 15).coerceAtLeast(1)
-                val d2 = (d1 + 15).coerceAtMost(monthEnd.dayOfMonth)
-                payDays.add(minOf(d1, monthEnd.dayOfMonth))
-                payDays.add(minOf(d2, monthEnd.dayOfMonth))
-            }
-            PayFrequency.MONTHLY -> {
-                payDays.add(minOf(anchorPayDate.dayOfMonth, monthEnd.dayOfMonth))
-            }
-        }
-        return payDays
+        return getEffectivePayDatesForMonth(year, month, anchorPayDate, frequency)
+            .map { it.dayOfMonth }
+            .toSet()
     }
 
     /**
      * Finds which calendar months in `year` will have 3 bi-weekly pay dates from `anchorPayDate`.
-     * Uses airtight modular arithmetic: finds the first pay date in `year` and collects all pay dates.
+     * Uses airtight modular arithmetic grounded in effective banking day adjustments.
      */
     fun findThreePaycheckMonths(
         year: Int,
@@ -367,23 +416,14 @@ object PaycheckCalculator {
         val formatter = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)
 
         fun getThreePayMonthsForYear(targetYear: Int): List<String> {
-            val jan1Epoch = LocalDate.of(targetYear, 1, 1).toEpochDay()
-            val daysDiff = jan1Epoch - anchorPayDate.toEpochDay()
-            val rem = Math.floorMod(daysDiff, 14L)
-            val firstPayEpoch = if (rem == 0L) jan1Epoch else jan1Epoch + (14L - rem)
-
-            var pay = LocalDate.ofEpochDay(firstPayEpoch)
-            val payDates = mutableListOf<LocalDate>()
-            while (pay.year == targetYear) {
-                payDates.add(pay)
-                pay = pay.plusDays(14)
-            }
-
-            return payDates.groupBy { it.month }
-                .filter { it.value.size >= 3 }
-                .map { entry ->
-                    LocalDate.of(targetYear, entry.key, 1).format(formatter)
+            val months = mutableListOf<String>()
+            for (m in 1..12) {
+                val payDates = getEffectivePayDatesForMonth(targetYear, m, anchorPayDate, PayFrequency.BI_WEEKLY)
+                if (payDates.size >= 3) {
+                    months.add(LocalDate.of(targetYear, m, 1).format(formatter))
                 }
+            }
+            return months
         }
 
         result.addAll(getThreePayMonthsForYear(year))
@@ -793,6 +833,146 @@ object PaycheckCalculator {
             unpaidBills = unpaidBills,
             unpaidDebts = unpaidDebts,
             unpaidObligations = unpaidObligations
+        )
+    }
+
+    /**
+     * Calculates multi-month rollover outlook:
+     * - Month 1 (Current Month):
+     *     projectedEndOfMonthBuffer = currentBalance + remainingPaychecksThisMonth - remainingUnpaidBillsThisMonth
+     * - Month 2+ (Future Months):
+     *     projectedEndOfMonthBuffer = priorMonthProjectedBuffer + scheduledPaychecksInMonth - scheduledBillsInMonth
+     *
+     * "Projected Income" strictly sums unreceived paychecks scheduled between today and the end of the selected month
+     * (with US Federal Reserve bank holiday shifts).
+     */
+    fun calculateMultiMonthOutlook(
+        currentBalance: Double,
+        bills: List<Bill>,
+        debts: List<Debt>,
+        config: PaycheckConfig,
+        takeHomePay: Double,
+        targetMonthOffset: Int,
+        currentDate: LocalDate = LocalDate.now(),
+        paidOccurrenceEpochDays: Set<Long> = emptySet()
+    ): MultiMonthOutlookResult {
+        var runningBuffer = currentBalance
+        val startYm = YearMonth.from(currentDate)
+
+        var result: MultiMonthOutlookResult? = null
+
+        for (offset in 0..maxOf(0, targetMonthOffset)) {
+            val ym = startYm.plusMonths(offset.toLong())
+            val year = ym.year
+            val month = ym.monthValue
+            val daysInMonth = ym.lengthOfMonth()
+            val isCurrentMonth = (offset == 0)
+
+            // 1. Paychecks for this month with bank holiday adjustment
+            val anchorPayDate = LocalDate.ofEpochDay(config.anchorPayDateEpochDay)
+            val allMonthPayDates = getEffectivePayDatesForMonth(year, month, anchorPayDate, config.frequency)
+            val payDatesInScope = if (isCurrentMonth) {
+                allMonthPayDates.filter { !it.isBefore(currentDate) }
+            } else {
+                allMonthPayDates
+            }
+
+            val payEvents = payDatesInScope.map { date ->
+                MonthlyEventItem(
+                    id = "payday_${date}",
+                    title = "Paycheck",
+                    subtitle = "Scheduled Income",
+                    date = date,
+                    amount = takeHomePay,
+                    isIncome = true,
+                    isPaid = false,
+                    originalBill = null
+                )
+            }
+            val expectedInflows = payEvents.sumOf { it.amount }
+
+            // 2. Bills & Debts in this month
+            val billEvents = mutableListOf<MonthlyEventItem>()
+            for (bill in bills) {
+                val dueDay = minOf(bill.dueDayOfMonth, daysInMonth)
+                val dueDate = LocalDate.of(year, month, dueDay)
+                val isPaid = if (paidOccurrenceEpochDays.isNotEmpty()) {
+                    paidOccurrenceEpochDays.contains(dueDate.toEpochDay())
+                } else {
+                    bill.isPaidForDate(dueDate, currentDate)
+                }
+                val isConsideredPaid = if (isCurrentMonth) isPaid else false
+                billEvents.add(
+                    MonthlyEventItem(
+                        id = "bill_${bill.id}_${dueDate}",
+                        title = bill.name,
+                        subtitle = bill.category,
+                        date = dueDate,
+                        amount = bill.amount,
+                        isIncome = false,
+                        isPaid = isConsideredPaid,
+                        originalBill = bill
+                    )
+                )
+            }
+
+            val remainingBills = if (isCurrentMonth) {
+                billEvents.filter { !it.isPaid }.sumOf { it.amount } +
+                        debts.filter { it.currentBalance > 0.0 && !it.isPaidThisMonth }.sumOf { it.minimumPayment }
+            } else {
+                bills.sumOf { it.amount } +
+                        debts.filter { it.currentBalance > 0.0 }.sumOf { it.minimumPayment }
+            }
+
+            val startingBalanceForMonth = if (isCurrentMonth) currentBalance else runningBuffer
+            val endOfMonthBuffer = startingBalanceForMonth + expectedInflows - remainingBills
+
+            if (offset == targetMonthOffset) {
+                val statusLevel = when {
+                    endOfMonthBuffer < 0.0 -> OutlookStatusLevel.SHORTFALL
+                    endOfMonthBuffer <= 250.0 -> OutlookStatusLevel.TIGHT
+                    else -> OutlookStatusLevel.ON_TRACK
+                }
+
+                val bufferCoverageRatio = if (remainingBills > 0.0) {
+                    (startingBalanceForMonth / remainingBills).coerceIn(0.0, 2.0).toFloat()
+                } else {
+                    1.0f
+                }
+
+                val allEvents = (payEvents + billEvents).sortedBy { it.date }
+                val immediateNext = allEvents.firstOrNull { !it.isPaid && !it.date.isBefore(currentDate) }
+                    ?: allEvents.firstOrNull { !it.isPaid }
+                    ?: allEvents.firstOrNull()
+
+                result = MultiMonthOutlookResult(
+                    targetYearMonth = ym,
+                    monthOffset = offset,
+                    startingBalance = startingBalanceForMonth,
+                    expectedInflows = expectedInflows,
+                    remainingBills = remainingBills,
+                    projectedEndOfMonthBuffer = endOfMonthBuffer,
+                    statusLevel = statusLevel,
+                    bufferCoverageRatio = bufferCoverageRatio,
+                    chronologicalEvents = allEvents,
+                    immediateNextEvent = immediateNext
+                )
+            }
+
+            runningBuffer = endOfMonthBuffer
+        }
+
+        return result ?: MultiMonthOutlookResult(
+            targetYearMonth = startYm,
+            monthOffset = 0,
+            startingBalance = currentBalance,
+            expectedInflows = 0.0,
+            remainingBills = 0.0,
+            projectedEndOfMonthBuffer = currentBalance,
+            statusLevel = OutlookStatusLevel.ON_TRACK,
+            bufferCoverageRatio = 1.0f,
+            chronologicalEvents = emptyList(),
+            immediateNextEvent = null
         )
     }
 }

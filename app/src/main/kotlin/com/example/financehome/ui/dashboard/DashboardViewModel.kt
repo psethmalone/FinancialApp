@@ -147,99 +147,63 @@ class DashboardViewModel @Inject constructor(
             initialValue = SafeToSpendStatus.empty()
         )
 
+    val selectedMonthOffset = MutableStateFlow(0)
+
+    fun selectMonthOffset(offset: Int) {
+        selectedMonthOffset.value = offset.coerceAtLeast(0)
+    }
+
+    private data class OutlookInput(
+        val monthOffset: Int,
+        val status: SafeToSpendStatus,
+        val billsList: List<Bill>,
+        val debtsList: List<Debt>
+    )
+
     val monthlyOutlook: StateFlow<DashboardMonthlyOutlook> =
         combine(
-            safeToSpendStatus,
-            bills,
-            debts,
+            combine(selectedMonthOffset, safeToSpendStatus, bills, debts) { offset, status, b, d ->
+                OutlookInput(offset, status, b, d)
+            },
             billRepo.paycheckConfig,
-            wageRepo.wageConfig
-        ) { status, billsList, debtsList, pConfig, wConfig ->
+            wageRepo.wageConfig,
+            billRepo.allOccurrences
+        ) { input, pConfig, wConfig, occurrences ->
             val today = LocalDate.now()
-            val year = today.year
-            val month = today.monthValue
-            val daysInMonth = today.lengthOfMonth()
-
-            // 1. Current available liquidity/cushion
-            val currentAvailable = status.remainingSafeToSpend
-
-            // 2. Paychecks remaining in this month (on or after today)
-            val anchorPayDate = LocalDate.ofEpochDay(pConfig.anchorPayDateEpochDay)
-            val allMonthPayDays = PaycheckCalculator.getPayDatesForMonth(year, month, anchorPayDate, pConfig.frequency)
-            val remainingPayDays = allMonthPayDays.filter { it >= today.dayOfMonth }.sorted()
-
             val wageEst = WageCalculator.calculateEstimate(wConfig, pConfig.frequency)
             val effectiveTakeHome = if (wConfig.autoSyncPaycheckPlanner) wageEst.effectiveTakeHomePay else pConfig.typicalTakeHomePay
 
-            val payEvents = remainingPayDays.map { day ->
-                MonthlyEventItem(
-                    id = "payday_${day}",
-                    title = "Paycheck",
-                    subtitle = "Scheduled Income",
-                    date = LocalDate.of(year, month, day),
-                    amount = effectiveTakeHome,
-                    isIncome = true,
-                    isPaid = false,
-                    originalBill = null
-                )
-            }
-            val expectedInflows = payEvents.sumOf { it.amount }
+            val paidEpochDays = occurrences.filter { it.isPaid }.map { it.dueDateEpochDay }.toSet()
 
-            // 3. Bills in this month
-            val billEvents = billsList.map { bill ->
-                val dueDay = minOf(bill.dueDayOfMonth, daysInMonth)
-                val dueDate = LocalDate.of(year, month, dueDay)
-                val isPaid = bill.isPaidForDate(dueDate, today)
-                MonthlyEventItem(
-                    id = "bill_${bill.id}_${dueDate}",
-                    title = bill.name,
-                    subtitle = bill.category,
-                    date = dueDate,
-                    amount = bill.amount,
-                    isIncome = false,
-                    isPaid = isPaid,
-                    originalBill = bill
-                )
-            }
-
-            // Remaining bills to be paid (only unpaid bills in this month)
-            val remainingBills = billEvents.filter { !it.isPaid }.sumOf { it.amount }
-
-            // 4. Projected End-of-Month Balance
-            val projectedBalance = currentAvailable + expectedInflows - remainingBills
-
-            // 5. Status Level
-            val statusLevel = when {
-                projectedBalance < 0.0 -> OutlookStatusLevel.SHORTFALL
-                projectedBalance <= 250.0 -> OutlookStatusLevel.TIGHT
-                else -> OutlookStatusLevel.ON_TRACK
-            }
-
-            // 6. Buffer coverage ratio (Runway bar)
-            val bufferCoverageRatio = if (remainingBills > 0.0) {
-                (currentAvailable / remainingBills).coerceIn(0.0, 2.0).toFloat()
-            } else {
-                1.0f
-            }
-
-            // 7. Chronological Events for the month
-            val futureEvents = (payEvents + billEvents.filter { !it.isPaid || it.date >= today }).sortedBy { it.date }
-            val immediateNext = futureEvents.firstOrNull { !it.isPaid } ?: futureEvents.firstOrNull()
+            val outlookResult = PaycheckCalculator.calculateMultiMonthOutlook(
+                currentBalance = input.status.remainingSafeToSpend,
+                bills = input.billsList,
+                debts = input.debtsList,
+                config = pConfig,
+                takeHomePay = effectiveTakeHome,
+                targetMonthOffset = input.monthOffset,
+                currentDate = today,
+                paidOccurrenceEpochDays = paidEpochDays
+            )
 
             DashboardMonthlyOutlook(
-                currentAvailableBalance = currentAvailable,
-                expectedInflows = expectedInflows,
-                remainingBills = remainingBills,
-                projectedEndOfMonthBalance = projectedBalance,
-                statusLevel = statusLevel,
-                bufferCoverageRatio = bufferCoverageRatio,
-                chronologicalEvents = futureEvents,
-                immediateNextEvent = immediateNext
+                selectedYearMonth = outlookResult.targetYearMonth,
+                monthOffset = outlookResult.monthOffset,
+                currentAvailableBalance = outlookResult.startingBalance,
+                expectedInflows = outlookResult.expectedInflows,
+                remainingBills = outlookResult.remainingBills,
+                projectedEndOfMonthBalance = outlookResult.projectedEndOfMonthBuffer,
+                statusLevel = outlookResult.statusLevel,
+                bufferCoverageRatio = outlookResult.bufferCoverageRatio,
+                chronologicalEvents = outlookResult.chronologicalEvents,
+                immediateNextEvent = outlookResult.immediateNextEvent
             )
         }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = DashboardMonthlyOutlook(
+                selectedYearMonth = java.time.YearMonth.now(),
+                monthOffset = 0,
                 currentAvailableBalance = 0.0,
                 expectedInflows = 0.0,
                 remainingBills = 0.0,
@@ -545,6 +509,8 @@ class DashboardViewModel @Inject constructor(
 }
 
 data class DashboardMonthlyOutlook(
+    val selectedYearMonth: java.time.YearMonth = java.time.YearMonth.now(),
+    val monthOffset: Int = 0,
     val currentAvailableBalance: Double,
     val expectedInflows: Double,
     val remainingBills: Double,
@@ -553,21 +519,4 @@ data class DashboardMonthlyOutlook(
     val bufferCoverageRatio: Float,
     val chronologicalEvents: List<MonthlyEventItem>,
     val immediateNextEvent: MonthlyEventItem?
-)
-
-enum class OutlookStatusLevel(val label: String) {
-    ON_TRACK("On Track"),
-    TIGHT("Tight"),
-    SHORTFALL("Shortfall")
-}
-
-data class MonthlyEventItem(
-    val id: String,
-    val title: String,
-    val subtitle: String,
-    val date: java.time.LocalDate,
-    val amount: Double,
-    val isIncome: Boolean,
-    val isPaid: Boolean,
-    val originalBill: com.example.financehome.data.model.Bill? = null
 )

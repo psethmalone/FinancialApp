@@ -99,6 +99,14 @@ class DebtsViewModel @Inject constructor(
                 initialValue = emptyList()
             )
 
+    val occurrences: StateFlow<List<com.example.financehome.data.model.BillOccurrenceEntity>> =
+        billRepo.allOccurrences
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = emptyList()
+            )
+
     val totalMonthlyBills: StateFlow<Double> =
         bills.map { list -> list.sumOf { it.amount } }
             .stateIn(

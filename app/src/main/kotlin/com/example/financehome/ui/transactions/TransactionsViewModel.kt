@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -228,8 +229,31 @@ class TransactionsViewModel @Inject constructor(
 
             // Auto-update linked bill or debt
             if (linkedBillId != null) {
-                billRepo.markBillPaid(linkedBillId, true)
+                val normalized = com.example.financehome.domain.MerchantNormalizer.normalize(merchant)
+                if (normalized.isNotEmpty()) {
+                    billRepo.saveMerchantRule(normalized, linkedBillId, isDebt = false)
+                }
+                val txDate = java.time.LocalDate.now()
+                val billsList = billRepo.getAllBills().firstOrNull() ?: emptyList()
+                val bill = billsList.find { it.id == linkedBillId }
+                if (bill != null) {
+                    val candidateMonths = listOf(
+                        java.time.YearMonth.from(txDate).minusMonths(1),
+                        java.time.YearMonth.from(txDate),
+                        java.time.YearMonth.from(txDate).plusMonths(1)
+                    )
+                    val nearestDue = candidateMonths.map { ym ->
+                        ym.atDay(minOf(bill.dueDayOfMonth, ym.lengthOfMonth()))
+                    }.minByOrNull { kotlin.math.abs(java.time.temporal.ChronoUnit.DAYS.between(txDate, it)) } ?: txDate
+                    billRepo.toggleOccurrencePaid(bill, nearestDue, matchedTxId = transactionId, currentDate = txDate)
+                } else {
+                    billRepo.markBillPaid(linkedBillId, true)
+                }
             } else if (linkedDebtId != null) {
+                val normalized = com.example.financehome.domain.MerchantNormalizer.normalize(merchant)
+                if (normalized.isNotEmpty()) {
+                    billRepo.saveMerchantRule(normalized, linkedDebtId, isDebt = true)
+                }
                 debtRepo.payDebt(linkedDebtId, amount)
             }
         }
@@ -237,6 +261,7 @@ class TransactionsViewModel @Inject constructor(
 
     fun linkTransactionToBill(transactionId: String, billId: String) {
         viewModelScope.launch {
+            val tx = transactionRepo.getTransactionById(transactionId)
             transactionRepo.updateTransactionLinks(
                 id = transactionId,
                 billId = billId,
@@ -244,12 +269,37 @@ class TransactionsViewModel @Inject constructor(
                 isDiscretionary = false,
                 noReceiptNeeded = true
             )
-            billRepo.markBillPaid(billId, true)
+            if (tx != null) {
+                val normalized = com.example.financehome.domain.MerchantNormalizer.normalize(tx.merchant)
+                if (normalized.isNotEmpty()) {
+                    billRepo.saveMerchantRule(normalized, billId, isDebt = false)
+                }
+                val txDate = java.time.Instant.ofEpochMilli(tx.timestampMillis)
+                    .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                val billsList = billRepo.getAllBills().firstOrNull() ?: emptyList()
+                val bill = billsList.find { it.id == billId }
+                if (bill != null) {
+                    val candidateMonths = listOf(
+                        java.time.YearMonth.from(txDate).minusMonths(1),
+                        java.time.YearMonth.from(txDate),
+                        java.time.YearMonth.from(txDate).plusMonths(1)
+                    )
+                    val nearestDue = candidateMonths.map { ym ->
+                        ym.atDay(minOf(bill.dueDayOfMonth, ym.lengthOfMonth()))
+                    }.minByOrNull { kotlin.math.abs(java.time.temporal.ChronoUnit.DAYS.between(txDate, it)) } ?: txDate
+                    billRepo.toggleOccurrencePaid(bill, nearestDue, matchedTxId = transactionId, currentDate = txDate)
+                } else {
+                    billRepo.markBillPaid(billId, true)
+                }
+            } else {
+                billRepo.markBillPaid(billId, true)
+            }
         }
     }
 
     fun linkTransactionToDebt(transactionId: String, debtId: String, amount: Double) {
         viewModelScope.launch {
+            val tx = transactionRepo.getTransactionById(transactionId)
             transactionRepo.updateTransactionLinks(
                 id = transactionId,
                 billId = null,
@@ -257,6 +307,12 @@ class TransactionsViewModel @Inject constructor(
                 isDiscretionary = false,
                 noReceiptNeeded = true
             )
+            if (tx != null) {
+                val normalized = com.example.financehome.domain.MerchantNormalizer.normalize(tx.merchant)
+                if (normalized.isNotEmpty()) {
+                    billRepo.saveMerchantRule(normalized, debtId, isDebt = true)
+                }
+            }
             debtRepo.payDebt(debtId, amount)
         }
     }

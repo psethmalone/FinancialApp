@@ -110,4 +110,6 @@ class TransactionRepository @Inject constructor(
     ): Int {
         return transactionDao.updateTransactionLinks(id, billId, debtId, isDiscretionary, noReceiptNeeded)
     }
+
+    suspend fun getTransactionById(id: String): Transaction? = transactionDao.getTransactionById(id)
 }

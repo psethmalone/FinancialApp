@@ -284,18 +284,95 @@ class FinanceNotificationListenerService : NotificationListenerService() {
         val userRules = ruleDao.getAllRulesList()
         val match = AutoCategorizer.categorize(parsed.merchant, userRules)
 
+        val txId = UUID.randomUUID().toString()
+        val txDate = java.time.LocalDate.now()
+
+        // Check merchant rules for auto-matching bills or debts
+        val billOccurrenceDao = db.billOccurrenceDao()
+        val merchantBillRuleDao = db.merchantBillRuleDao()
+        val billDao = db.billDao()
+        val debtDao = db.debtDao()
+
+        val normalizedMerchant = com.example.financehome.domain.MerchantNormalizer.normalize(parsed.merchant)
+        val rules = merchantBillRuleDao.getAllRulesList()
+        val matchedRule = rules.firstOrNull { it.normalizedMerchant == normalizedMerchant }
+            ?: rules.firstOrNull { normalizedMerchant.contains(it.normalizedMerchant) || it.normalizedMerchant.contains(normalizedMerchant) }
+
+        var matchedBillId: String? = null
+        var matchedDebtId: String? = null
+        var isDiscretionary = match.isDiscretionary
+
+        if (matchedRule != null) {
+            if (!matchedRule.isDebt) {
+                val bill = billDao.getBillById(matchedRule.billId)
+                if (bill != null) {
+                    val candidateMonths = listOf(
+                        java.time.YearMonth.from(txDate).minusMonths(1),
+                        java.time.YearMonth.from(txDate),
+                        java.time.YearMonth.from(txDate).plusMonths(1)
+                    )
+                    val candidateDueDates = candidateMonths.map { ym ->
+                        ym.atDay(minOf(bill.dueDayOfMonth, ym.lengthOfMonth()))
+                    }
+                    val nearestDueDate = candidateDueDates
+                        .map { date -> Pair(date, kotlin.math.abs(java.time.temporal.ChronoUnit.DAYS.between(txDate, date))) }
+                        .filter { it.second <= 10L }
+                        .minByOrNull { it.second }
+                        ?.first
+
+                    if (nearestDueDate != null) {
+                        val existingOcc = billOccurrenceDao.getOccurrence(bill.id, nearestDueDate.toEpochDay())
+                        if (existingOcc == null || !existingOcc.isPaid) {
+                            billOccurrenceDao.upsertOccurrence(
+                                com.example.financehome.data.model.BillOccurrenceEntity(
+                                    billId = bill.id,
+                                    dueDateEpochDay = nearestDueDate.toEpochDay(),
+                                    isPaid = true,
+                                    paidDateEpochDay = txDate.toEpochDay(),
+                                    matchedTransactionId = txId,
+                                    amount = parsed.amount
+                                )
+                            )
+                            if (nearestDueDate.year == txDate.year && nearestDueDate.monthValue == txDate.monthValue) {
+                                billDao.markPaid(bill.id, true, nowMs)
+                            }
+                            matchedBillId = bill.id
+                            isDiscretionary = false
+                        }
+                    }
+                }
+            } else {
+                val debt = debtDao.getDebtById(matchedRule.billId)
+                if (debt != null) {
+                    val newBalance = maxOf(0.0, debt.currentBalance - parsed.amount)
+                    debtDao.updateDebt(
+                        debt.copy(
+                            currentBalance = newBalance,
+                            isPaidThisMonth = true,
+                            lastPaidTimestampMillis = System.currentTimeMillis()
+                        )
+                    )
+                    matchedDebtId = debt.id
+                    isDiscretionary = false
+                }
+            }
+        }
+
         val transaction = Transaction(
-            id = UUID.randomUUID().toString(),
+            id = txId,
             amount = parsed.amount,
             merchant = parsed.merchant,
             type = parsed.type,
             category = match.category,
             source = TransactionSource.NOTIFICATION,
-            isDiscretionary = match.isDiscretionary,
+            isDiscretionary = isDiscretionary,
             timestampMillis = nowMs,
             rawNotificationText = parsed.rawText,
             notes = if (match.isRecurringRent) "Monthly Rent / Fixed Obligation" else null,
-            isSynced = false
+            isSynced = false,
+            noReceiptNeeded = (matchedBillId != null || matchedDebtId != null),
+            linkedBillId = matchedBillId,
+            linkedDebtId = matchedDebtId
         )
 
         transactionDao.insertTransaction(transaction)
@@ -303,7 +380,7 @@ class FinanceNotificationListenerService : NotificationListenerService() {
             val alertManager = getEntryPoint()?.spendingAlertManager()
             if (alertManager != null) {
                 alertManager.checkAndPostAlert(transaction)
-            } else {
+            } else if (transaction.linkedBillId == null && transaction.linkedDebtId == null) {
                 showReceiptPromptNotification(transaction)
             }
         }

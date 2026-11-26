@@ -45,4 +45,10 @@ object DatabaseModule {
 
     @Provides
     fun provideReceiptDao(db: AppDatabase): com.example.financehome.data.local.ReceiptDao = db.receiptDao()
+
+    @Provides
+    fun provideBillOccurrenceDao(db: AppDatabase): com.example.financehome.data.local.BillOccurrenceDao = db.billOccurrenceDao()
+
+    @Provides
+    fun provideMerchantBillRuleDao(db: AppDatabase): com.example.financehome.data.local.MerchantBillRuleDao = db.merchantBillRuleDao()
 }

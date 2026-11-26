@@ -20,9 +20,11 @@ import com.example.financehome.data.model.Transaction
         Bill::class,
         com.example.financehome.data.model.PortfolioHolding::class,
         com.example.financehome.data.model.PortfolioTrade::class,
-        com.example.financehome.data.model.ReceiptItem::class
+        com.example.financehome.data.model.ReceiptItem::class,
+        com.example.financehome.data.model.BillOccurrenceEntity::class,
+        com.example.financehome.data.model.MerchantBillRuleEntity::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -35,6 +37,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun billDao(): BillDao
     abstract fun portfolioDao(): PortfolioDao
     abstract fun receiptDao(): ReceiptDao
+    abstract fun billOccurrenceDao(): BillOccurrenceDao
+    abstract fun merchantBillRuleDao(): MerchantBillRuleDao
 
     companion object {
         const val DATABASE_NAME = "financehome.db"
@@ -120,6 +124,35 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_9_10 = object : androidx.room.migration.Migration(9, 10) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `bill_occurrences` (
+                        `billId` TEXT NOT NULL,
+                        `dueDateEpochDay` INTEGER NOT NULL,
+                        `isPaid` INTEGER NOT NULL DEFAULT 0,
+                        `paidDateEpochDay` INTEGER,
+                        `matchedTransactionId` TEXT,
+                        `amount` REAL NOT NULL DEFAULT 0.0,
+                        PRIMARY KEY(`billId`, `dueDateEpochDay`),
+                        FOREIGN KEY(`billId`) REFERENCES `bills`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_bill_occurrences_billId` ON `bill_occurrences` (`billId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_bill_occurrences_dueDateEpochDay` ON `bill_occurrences` (`dueDateEpochDay`)")
+
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `merchant_bill_rules` (
+                        `normalizedMerchant` TEXT NOT NULL,
+                        `billId` TEXT NOT NULL,
+                        `isDebt` INTEGER NOT NULL DEFAULT 0,
+                        `createdAtMillis` INTEGER NOT NULL,
+                        PRIMARY KEY(`normalizedMerchant`)
+                    )
+                """.trimIndent())
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -130,7 +163,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     DATABASE_NAME
                 )
-                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance

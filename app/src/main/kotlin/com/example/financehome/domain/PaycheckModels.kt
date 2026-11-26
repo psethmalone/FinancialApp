@@ -130,3 +130,33 @@ data class PaycheckBreakdown(
 
     val upcomingBillsInPeriod: List<Bill> get() = billsDueInPeriod.map { it.bill }
 }
+
+data class MonthlyEventItem(
+    val id: String,
+    val title: String,
+    val subtitle: String,
+    val date: LocalDate,
+    val amount: Double,
+    val isIncome: Boolean,
+    val isPaid: Boolean,
+    val originalBill: Bill? = null
+)
+
+enum class OutlookStatusLevel(val label: String) {
+    ON_TRACK("On Track"),
+    TIGHT("Tight"),
+    SHORTFALL("Shortfall")
+}
+
+data class MultiMonthOutlookResult(
+    val targetYearMonth: YearMonth,
+    val monthOffset: Int,
+    val startingBalance: Double,
+    val expectedInflows: Double,
+    val remainingBills: Double,
+    val projectedEndOfMonthBuffer: Double,
+    val statusLevel: OutlookStatusLevel,
+    val bufferCoverageRatio: Float,
+    val chronologicalEvents: List<MonthlyEventItem>,
+    val immediateNextEvent: MonthlyEventItem?
+)
