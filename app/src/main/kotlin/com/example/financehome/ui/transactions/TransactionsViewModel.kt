@@ -254,7 +254,21 @@ class TransactionsViewModel @Inject constructor(
                 if (normalized.isNotEmpty()) {
                     billRepo.saveMerchantRule(normalized, linkedDebtId, isDebt = true)
                 }
-                debtRepo.payDebt(linkedDebtId, amount)
+                val txDate = java.time.LocalDate.now()
+                val debt = debtRepo.getDebtById(linkedDebtId)
+                if (debt != null) {
+                    val candidateMonths = listOf(
+                        java.time.YearMonth.from(txDate).minusMonths(1),
+                        java.time.YearMonth.from(txDate),
+                        java.time.YearMonth.from(txDate).plusMonths(1)
+                    )
+                    val nearestDue = candidateMonths.map { ym ->
+                        ym.atDay(minOf(debt.dueDayOfMonth, ym.lengthOfMonth()))
+                    }.minByOrNull { kotlin.math.abs(java.time.temporal.ChronoUnit.DAYS.between(txDate, it)) } ?: txDate
+                    debtRepo.payDebt(linkedDebtId, amount, targetDate = nearestDue, currentDate = txDate)
+                } else {
+                    debtRepo.payDebt(linkedDebtId, amount)
+                }
             }
         }
     }
@@ -312,8 +326,25 @@ class TransactionsViewModel @Inject constructor(
                 if (normalized.isNotEmpty()) {
                     billRepo.saveMerchantRule(normalized, debtId, isDebt = true)
                 }
+                val txDate = java.time.Instant.ofEpochMilli(tx.timestampMillis)
+                    .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                val debt = debtRepo.getDebtById(debtId)
+                if (debt != null) {
+                    val candidateMonths = listOf(
+                        java.time.YearMonth.from(txDate).minusMonths(1),
+                        java.time.YearMonth.from(txDate),
+                        java.time.YearMonth.from(txDate).plusMonths(1)
+                    )
+                    val nearestDue = candidateMonths.map { ym ->
+                        ym.atDay(minOf(debt.dueDayOfMonth, ym.lengthOfMonth()))
+                    }.minByOrNull { kotlin.math.abs(java.time.temporal.ChronoUnit.DAYS.between(txDate, it)) } ?: txDate
+                    debtRepo.payDebt(debtId, amount, targetDate = nearestDue, currentDate = txDate)
+                } else {
+                    debtRepo.payDebt(debtId, amount)
+                }
+            } else {
+                debtRepo.payDebt(debtId, amount)
             }
-            debtRepo.payDebt(debtId, amount)
         }
     }
 

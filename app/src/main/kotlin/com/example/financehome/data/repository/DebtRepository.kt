@@ -65,17 +65,84 @@ class DebtRepository @Inject constructor(
 
     suspend fun deleteDebt(debt: Debt) = debtDao.deleteDebt(debt)
 
-    suspend fun toggleDebtPaid(debt: Debt) {
-        val newPaid = !debt.isPaidThisMonth
-        val timestamp = if (newPaid) System.currentTimeMillis() else null
-        debtDao.markPaid(debt.id, newPaid, timestamp)
+    suspend fun toggleDebtPaid(
+        debt: Debt,
+        targetDate: java.time.LocalDate? = null,
+        currentDate: java.time.LocalDate = java.time.LocalDate.now()
+    ) {
+        val dueToSettle = targetDate ?: debt.getEffectiveNextDueDate(currentDate)
+        val currentlyPaid = debt.isPaidForDate(dueToSettle, currentDate)
+        if (currentlyPaid) {
+            unmarkDebtPaid(debt, targetDate = dueToSettle, currentDate = currentDate)
+        } else {
+            markDebtPaidForCycle(debt, targetDate = dueToSettle, currentDate = currentDate)
+        }
     }
 
-    suspend fun payDebt(debtId: String, amount: Double) {
+    suspend fun markDebtPaidForCycle(
+        debt: Debt,
+        targetDate: java.time.LocalDate? = null,
+        currentDate: java.time.LocalDate = java.time.LocalDate.now()
+    ) {
+        val dueToSettle = targetDate ?: debt.getEffectiveNextDueDate(currentDate)
+        val advancedDue = debt.advanceDueDate(dueToSettle)
+        val isPaidThisMonth = (dueToSettle.year == currentDate.year && dueToSettle.monthValue == currentDate.monthValue)
+        val timestamp = System.currentTimeMillis()
+
+        debtDao.updateDebtSettlement(
+            id = debt.id,
+            nextDueDateEpochDay = advancedDue.toEpochDay(),
+            lastSettledDateEpochDay = dueToSettle.toEpochDay(),
+            isPaid = isPaidThisMonth,
+            timestamp = timestamp
+        )
+    }
+
+    suspend fun unmarkDebtPaid(
+        debt: Debt,
+        targetDate: java.time.LocalDate? = null,
+        currentDate: java.time.LocalDate = java.time.LocalDate.now()
+    ) {
+        val thisMonthDue = try {
+            currentDate.withDayOfMonth(minOf(debt.dueDayOfMonth, currentDate.lengthOfMonth()))
+        } catch (_: Exception) {
+            currentDate
+        }
+        val target = targetDate ?: thisMonthDue
+        val isThisCurrentMonth = (target.year == currentDate.year && target.monthValue == currentDate.monthValue)
+        val isStillPaidThisMonth = if (isThisCurrentMonth) false else debt.isPaidThisMonth
+        val restoredNextDue = target.toEpochDay()
+
+        debtDao.updateDebtSettlement(
+            id = debt.id,
+            nextDueDateEpochDay = restoredNextDue,
+            lastSettledDateEpochDay = null,
+            isPaid = isStillPaidThisMonth,
+            timestamp = null
+        )
+    }
+
+    suspend fun payDebt(
+        debtId: String,
+        amount: Double,
+        targetDate: java.time.LocalDate? = null,
+        currentDate: java.time.LocalDate = java.time.LocalDate.now()
+    ) {
         val debt = debtDao.getDebtById(debtId) ?: return
         val newBalance = maxOf(0.0, debt.currentBalance - amount)
+        val dueToSettle = targetDate ?: debt.getEffectiveNextDueDate(currentDate)
+        val advancedDue = debt.advanceDueDate(dueToSettle)
+        val isPaidThisMonth = (dueToSettle.year == currentDate.year && dueToSettle.monthValue == currentDate.monthValue)
         val timestamp = System.currentTimeMillis()
-        debtDao.updateDebt(debt.copy(currentBalance = newBalance, isPaidThisMonth = true))
-        debtDao.markPaid(debt.id, true, timestamp)
+
+        debtDao.updateDebt(
+            debt.copy(
+                currentBalance = newBalance,
+                nextDueDateEpochDay = advancedDue.toEpochDay(),
+                lastSettledDateEpochDay = dueToSettle.toEpochDay(),
+                isPaidThisMonth = isPaidThisMonth,
+                lastPaidTimestampMillis = timestamp
+            )
+        )
     }
 }

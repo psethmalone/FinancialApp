@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.financehome.data.local.CategoryTotal
 import com.example.financehome.data.model.Bill
+import com.example.financehome.data.model.Debt
 import com.example.financehome.data.model.ReceiptItem
 import com.example.financehome.data.model.Transaction
 import com.example.financehome.data.model.TransactionType
@@ -331,6 +332,7 @@ fun DashboardScreen(
                                     viewModel.selectMonthOffset(monthlyOutlook.monthOffset + 1)
                                 },
                                 onToggleBillPaid = { bill, date -> viewModel.toggleBillPaid(bill, date) },
+                                onToggleDebtPaid = { debt, date -> viewModel.toggleDebtPaid(debt, date) },
                                 onNavigateToCashFlow = { onNavigateToCashFlow(false) }
                             )
                         }
@@ -808,6 +810,7 @@ fun UnifiedMonthlyHeroCard(
     onPreviousMonth: () -> Unit = {},
     onNextMonth: () -> Unit = {},
     onToggleBillPaid: (Bill, LocalDate) -> Unit,
+    onToggleDebtPaid: (Debt, LocalDate) -> Unit = { _, _ -> },
     onNavigateToCashFlow: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1153,15 +1156,26 @@ fun UnifiedMonthlyHeroCard(
                                 .size(28.dp)
                                 .clip(CircleShape)
                                 .background(
-                                    if (nextEvent.isIncome) ColorIncome.copy(alpha = 0.15f)
-                                    else MaterialTheme.colorScheme.primaryContainer
+                                    when {
+                                        nextEvent.isIncome -> ColorIncome.copy(alpha = 0.15f)
+                                        nextEvent.originalDebt != null -> ColorExpense.copy(alpha = 0.15f)
+                                        else -> MaterialTheme.colorScheme.primaryContainer
+                                    }
                                 ),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = if (nextEvent.isIncome) Icons.Default.ArrowUpward else Icons.Default.Receipt,
+                                imageVector = when {
+                                    nextEvent.isIncome -> Icons.Default.ArrowUpward
+                                    nextEvent.originalDebt != null -> Icons.Default.CreditCard
+                                    else -> Icons.Default.Receipt
+                                },
                                 contentDescription = null,
-                                tint = if (nextEvent.isIncome) ColorIncome else MaterialTheme.colorScheme.primary,
+                                tint = when {
+                                    nextEvent.isIncome -> ColorIncome
+                                    nextEvent.originalDebt != null -> ColorExpense
+                                    else -> MaterialTheme.colorScheme.primary
+                                },
                                 modifier = Modifier.size(15.dp)
                             )
                         }
@@ -1203,6 +1217,15 @@ fun UnifiedMonthlyHeroCard(
                         if (nextEvent.originalBill != null && !nextEvent.isPaid) {
                             FilledTonalButton(
                                 onClick = { onToggleBillPaid(nextEvent.originalBill, nextEvent.date) },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(28.dp)
+                            ) {
+                                Text("Mark Paid", style = MaterialTheme.typography.labelSmall)
+                            }
+                        } else if (nextEvent.originalDebt != null && !nextEvent.isPaid) {
+                            FilledTonalButton(
+                                onClick = { onToggleDebtPaid(nextEvent.originalDebt, nextEvent.date) },
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier.height(28.dp)
@@ -1275,9 +1298,17 @@ fun UnifiedMonthlyHeroCard(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Icon(
-                                        imageVector = if (event.isIncome) Icons.Default.ArrowUpward else Icons.Default.Receipt,
+                                        imageVector = when {
+                                            event.isIncome -> Icons.Default.ArrowUpward
+                                            event.originalDebt != null -> Icons.Default.CreditCard
+                                            else -> Icons.Default.Receipt
+                                        },
                                         contentDescription = null,
-                                        tint = if (event.isIncome) ColorIncome else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        tint = when {
+                                            event.isIncome -> ColorIncome
+                                            event.originalDebt != null -> ColorExpense
+                                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
                                         modifier = Modifier.size(16.dp)
                                     )
                                     Column {
@@ -1312,6 +1343,29 @@ fun UnifiedMonthlyHeroCard(
                                     } else {
                                         OutlinedButton(
                                             onClick = { onToggleBillPaid(event.originalBill, event.date) },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            shape = RoundedCornerShape(6.dp),
+                                            modifier = Modifier.height(26.dp)
+                                        ) {
+                                            Text("Mark Paid", style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
+                                } else if (event.originalDebt != null) {
+                                    if (event.isPaid) {
+                                        Surface(
+                                            color = ColorIncome.copy(alpha = 0.15f),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text(
+                                                text = "PAID",
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                color = ColorIncome,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    } else {
+                                        OutlinedButton(
+                                            onClick = { onToggleDebtPaid(event.originalDebt, event.date) },
                                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                             shape = RoundedCornerShape(6.dp),
                                             modifier = Modifier.height(26.dp)

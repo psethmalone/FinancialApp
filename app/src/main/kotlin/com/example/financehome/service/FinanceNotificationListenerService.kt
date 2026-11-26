@@ -29,6 +29,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.util.UUID
+import java.time.LocalDate
+import java.time.YearMonth
+import java.time.temporal.ChronoUnit
+import kotlin.math.abs
 
 import android.content.ComponentName
 import android.content.pm.PackageManager
@@ -344,11 +348,25 @@ class FinanceNotificationListenerService : NotificationListenerService() {
             } else {
                 val debt = debtDao.getDebtById(matchedRule.billId)
                 if (debt != null) {
+                    val txDate = LocalDate.now()
+                    val candidateMonths = listOf(
+                        YearMonth.from(txDate).minusMonths(1),
+                        YearMonth.from(txDate),
+                        YearMonth.from(txDate).plusMonths(1)
+                    )
+                    val nearestDue = candidateMonths.map { ym ->
+                        ym.atDay(minOf(debt.dueDayOfMonth, ym.lengthOfMonth()))
+                    }.minByOrNull { abs(ChronoUnit.DAYS.between(txDate, it)) } ?: txDate
+                    val isWithin10Days = abs(ChronoUnit.DAYS.between(txDate, nearestDue)) <= 10
                     val newBalance = maxOf(0.0, debt.currentBalance - parsed.amount)
+                    val advancedDue = if (isWithin10Days) debt.advanceDueDate(nearestDue) else LocalDate.ofEpochDay(debt.nextDueDateEpochDay)
+                    val isPaidThisMonth = (nearestDue.year == txDate.year && nearestDue.monthValue == txDate.monthValue)
                     debtDao.updateDebt(
                         debt.copy(
                             currentBalance = newBalance,
-                            isPaidThisMonth = true,
+                            nextDueDateEpochDay = if (isWithin10Days) advancedDue.toEpochDay() else debt.nextDueDateEpochDay,
+                            lastSettledDateEpochDay = if (isWithin10Days) nearestDue.toEpochDay() else debt.lastSettledDateEpochDay,
+                            isPaidThisMonth = isPaidThisMonth,
                             lastPaidTimestampMillis = System.currentTimeMillis()
                         )
                     )

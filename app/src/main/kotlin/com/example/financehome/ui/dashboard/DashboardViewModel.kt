@@ -506,6 +506,12 @@ class DashboardViewModel @Inject constructor(
             billRepo.toggleBillPaid(bill, targetDate)
         }
     }
+
+    fun toggleDebtPaid(debt: Debt, targetDate: LocalDate? = null) {
+        viewModelScope.launch {
+            debtRepo.toggleDebtPaid(debt, targetDate)
+        }
+    }
 }
 
 data class DashboardMonthlyOutlook(

@@ -444,7 +444,8 @@ object PaycheckCalculator {
         bills: List<Bill>,
         debts: List<Debt>,
         startDate: LocalDate,
-        endDate: LocalDate
+        endDate: LocalDate,
+        currentDate: LocalDate = LocalDate.now()
     ): List<UpcomingObligationItem> {
         val scheduled = mutableListOf<UpcomingObligationItem>()
 
@@ -462,7 +463,7 @@ object PaycheckCalculator {
                             dueDayOfMonth = bill.dueDayOfMonth,
                             dueDate = curr,
                             type = ObligationType.BILL,
-                            isPaid = bill.isPaidForDate(curr),
+                            isPaid = bill.isPaidForDate(curr, currentDate),
                             subtitle = bill.category,
                             originalBill = bill
                         )
@@ -489,7 +490,7 @@ object PaycheckCalculator {
                             dueDayOfMonth = debt.dueDayOfMonth,
                             dueDate = curr,
                             type = ObligationType.DEBT,
-                            isPaid = debt.isPaidThisMonth,
+                            isPaid = debt.isPaidForDate(curr, currentDate),
                             subtitle = "$debtTypeName • Min Payment",
                             originalDebt = debt
                         )
@@ -818,7 +819,11 @@ object PaycheckCalculator {
             !it.isPaidForDate(dueDate)
         }.sumOf { it.amount }
 
-        val unpaidDebts = debts.filter { it.currentBalance > 0.0 && !it.isPaidThisMonth }.sumOf { it.minimumPayment }
+        val unpaidDebts = debts.filter {
+            val dueDay = minOf(it.dueDayOfMonth, daysInMonth)
+            val dueDate = LocalDate.of(year, month, dueDay)
+            it.currentBalance > 0.0 && !it.isPaidForDate(dueDate, currentDate = if (isCurrentMonth) LocalDate.now() else LocalDate.of(year, month, 1))
+        }.sumOf { it.minimumPayment }
         val unpaidObligations = unpaidBills + unpaidDebts
 
         return MonthlyGlimpse(
@@ -886,13 +891,14 @@ object PaycheckCalculator {
                     amount = takeHomePay,
                     isIncome = true,
                     isPaid = false,
-                    originalBill = null
+                    originalBill = null,
+                    originalDebt = null
                 )
             }
             val expectedInflows = payEvents.sumOf { it.amount }
 
             // 2. Bills & Debts in this month
-            val billEvents = mutableListOf<MonthlyEventItem>()
+            val obligationEvents = mutableListOf<MonthlyEventItem>()
             for (bill in bills) {
                 val dueDay = minOf(bill.dueDayOfMonth, daysInMonth)
                 val dueDate = LocalDate.of(year, month, dueDay)
@@ -902,7 +908,7 @@ object PaycheckCalculator {
                     bill.isPaidForDate(dueDate, currentDate)
                 }
                 val isConsideredPaid = if (isCurrentMonth) isPaid else false
-                billEvents.add(
+                obligationEvents.add(
                     MonthlyEventItem(
                         id = "bill_${bill.id}_${dueDate}",
                         title = bill.name,
@@ -911,14 +917,37 @@ object PaycheckCalculator {
                         amount = bill.amount,
                         isIncome = false,
                         isPaid = isConsideredPaid,
-                        originalBill = bill
+                        originalBill = bill,
+                        originalDebt = null
+                    )
+                )
+            }
+
+            for (debt in debts) {
+                if (debt.currentBalance <= 0.0 || debt.minimumPayment <= 0.0) continue
+                val dueDay = minOf(debt.dueDayOfMonth, daysInMonth)
+                val dueDate = LocalDate.of(year, month, dueDay)
+                val isPaid = debt.isPaidForDate(dueDate, currentDate)
+                val isConsideredPaid = if (isCurrentMonth) isPaid else false
+                val debtTypeName = debt.type.name.replace('_', ' ').lowercase()
+                    .replaceFirstChar { it.uppercase() }
+                obligationEvents.add(
+                    MonthlyEventItem(
+                        id = "debt_${debt.id}_${dueDate}",
+                        title = debt.name,
+                        subtitle = "$debtTypeName • Min Payment",
+                        date = dueDate,
+                        amount = debt.minimumPayment,
+                        isIncome = false,
+                        isPaid = isConsideredPaid,
+                        originalBill = null,
+                        originalDebt = debt
                     )
                 )
             }
 
             val remainingBills = if (isCurrentMonth) {
-                billEvents.filter { !it.isPaid }.sumOf { it.amount } +
-                        debts.filter { it.currentBalance > 0.0 && !it.isPaidThisMonth }.sumOf { it.minimumPayment }
+                obligationEvents.filter { !it.isPaid }.sumOf { it.amount }
             } else {
                 bills.sumOf { it.amount } +
                         debts.filter { it.currentBalance > 0.0 }.sumOf { it.minimumPayment }
@@ -940,7 +969,7 @@ object PaycheckCalculator {
                     1.0f
                 }
 
-                val allEvents = (payEvents + billEvents).sortedBy { it.date }
+                val allEvents = (payEvents + obligationEvents).sortedBy { it.date }
                 val immediateNext = allEvents.firstOrNull { !it.isPaid && !it.date.isBefore(currentDate) }
                     ?: allEvents.firstOrNull { !it.isPaid }
                     ?: allEvents.firstOrNull()

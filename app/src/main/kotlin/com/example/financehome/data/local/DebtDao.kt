@@ -55,4 +55,14 @@ interface DebtDao {
     /** Marks the debt with [id] paid or unpaid for this billing cycle. */
     @Query("UPDATE debts SET isPaidThisMonth = :isPaid, lastPaidTimestampMillis = :timestamp WHERE id = :id")
     suspend fun markPaid(id: String, isPaid: Boolean, timestamp: Long?)
+
+    /** Updates debt cycle settlement state. */
+    @Query("UPDATE debts SET nextDueDateEpochDay = :nextDueDateEpochDay, lastSettledDateEpochDay = :lastSettledDateEpochDay, isPaidThisMonth = :isPaid, lastPaidTimestampMillis = :timestamp WHERE id = :id")
+    suspend fun updateDebtSettlement(
+        id: String,
+        nextDueDateEpochDay: Long,
+        lastSettledDateEpochDay: Long?,
+        isPaid: Boolean,
+        timestamp: Long?
+    )
 }

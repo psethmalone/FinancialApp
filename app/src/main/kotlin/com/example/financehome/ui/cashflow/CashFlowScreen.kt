@@ -188,12 +188,12 @@ fun CashFlowScreen(
                                 wageEstimate = wageEstimate,
                                 currencyFormat = currencyFormat,
                                 onToggleBillPaid = { bill, date -> viewModel.toggleBillPaid(bill, date) },
-                                onToggleDebtPaid = { viewModel.toggleDebtPaid(it) },
+                                onToggleDebtPaid = { debt, date -> viewModel.toggleDebtPaid(debt, date) },
                                 onToggleObligationPaid = { item ->
                                     if (item.type == ObligationType.BILL && item.originalBill != null) {
                                         viewModel.toggleBillPaid(item.originalBill, item.dueDate)
                                     } else if (item.type == ObligationType.DEBT && item.originalDebt != null) {
-                                        viewModel.toggleDebtPaid(item.originalDebt)
+                                        viewModel.toggleDebtPaid(item.originalDebt, item.dueDate)
                                     }
                                 }
                             )
@@ -823,7 +823,7 @@ fun CashFlowCalendarCard(
     wageEstimate: WageEstimate?,
     currencyFormat: NumberFormat,
     onToggleBillPaid: (Bill, LocalDate) -> Unit,
-    onToggleDebtPaid: (Debt) -> Unit,
+    onToggleDebtPaid: (Debt, LocalDate) -> Unit,
     onToggleObligationPaid: (UpcomingObligationItem) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1007,6 +1007,11 @@ fun CashFlowCalendarCard(
                             val isAllBillsPaid = thisDayBills.isNotEmpty() && thisDayBills.all {
                                 paidEpochDays.contains(dayDate.toEpochDay()) || it.isPaidForDate(dayDate)
                             }
+                            val thisDayDebts = debtDays[dayNumber] ?: emptyList()
+                            val isAllDebtsPaid = thisDayDebts.isNotEmpty() && thisDayDebts.all {
+                                it.isPaidForDate(dayDate)
+                            }
+                            val isAllObligationsPaid = (hasBills || hasDebts) && (!hasBills || isAllBillsPaid) && (!hasDebts || isAllDebtsPaid)
                             val isSelected = selectedDay == dayNumber
                             val isToday = displayedMonth == YearMonth.now() && dayNumber == LocalDate.now().dayOfMonth
 
@@ -1018,7 +1023,7 @@ fun CashFlowCalendarCard(
                                         when {
                                             isSelected -> MaterialTheme.colorScheme.primary
                                             isToday -> MaterialTheme.colorScheme.primaryContainer
-                                            isAllBillsPaid -> ColorIncome.copy(alpha = 0.18f)
+                                            isAllObligationsPaid -> ColorIncome.copy(alpha = 0.18f)
                                             else -> androidx.compose.ui.graphics.Color.Transparent
                                         }
                                     )
@@ -1029,11 +1034,11 @@ fun CashFlowCalendarCard(
                                     Text(
                                         text = "$dayNumber",
                                         style = MaterialTheme.typography.bodySmall.copy(
-                                            fontWeight = if (isSelected || isToday || isPayday || isAllBillsPaid) FontWeight.Bold else FontWeight.Normal,
+                                            fontWeight = if (isSelected || isToday || isPayday || isAllObligationsPaid) FontWeight.Bold else FontWeight.Normal,
                                             color = when {
                                                 isSelected -> MaterialTheme.colorScheme.onPrimary
                                                 isToday -> MaterialTheme.colorScheme.primary
-                                                isAllBillsPaid -> ColorIncome
+                                                isAllObligationsPaid -> ColorIncome
                                                 else -> MaterialTheme.colorScheme.onSurface
                                             }
                                         )
@@ -1050,7 +1055,10 @@ fun CashFlowCalendarCard(
                                             Box(modifier = Modifier.size(4.dp).clip(CircleShape).background(billDotColor))
                                         }
                                         if (hasDebts) {
-                                            Box(modifier = Modifier.size(4.dp).clip(CircleShape).background(if (isSelected) MaterialTheme.colorScheme.onPrimary else ColorExpense))
+                                            val debtDotColor = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                                                else if (isAllDebtsPaid) ColorIncome
+                                                else ColorExpense
+                                            Box(modifier = Modifier.size(4.dp).clip(CircleShape).background(debtDotColor))
                                         }
                                     }
                                 }
@@ -1200,12 +1208,14 @@ fun CashFlowCalendarCard(
                     }
 
                     dayDebts.forEach { debt ->
+                        val dueDate = displayedMonth.atDay(day)
+                        val isPaid = debt.isPaidForDate(dueDate, LocalDate.now())
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(MaterialTheme.colorScheme.surface)
-                                .clickable { onToggleDebtPaid(debt) }
+                                .clickable { onToggleDebtPaid(debt, dueDate) }
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
@@ -1215,19 +1225,37 @@ fun CashFlowCalendarCard(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Icon(
-                                    imageVector = if (debt.isPaidThisMonth) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                    imageVector = if (isPaid) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
                                     contentDescription = null,
-                                    tint = if (debt.isPaidThisMonth) ColorIncome else MaterialTheme.colorScheme.outline,
+                                    tint = if (isPaid) ColorIncome else MaterialTheme.colorScheme.outline,
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Column {
-                                    Text(
-                                        text = debt.name,
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            fontWeight = FontWeight.SemiBold,
-                                            textDecoration = if (debt.isPaidThisMonth) TextDecoration.LineThrough else TextDecoration.None
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = debt.name,
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                fontWeight = FontWeight.SemiBold,
+                                                textDecoration = if (isPaid) TextDecoration.LineThrough else TextDecoration.None
+                                            )
                                         )
-                                    )
+                                        if (isPaid) {
+                                            Surface(
+                                                color = ColorIncome.copy(alpha = 0.15f),
+                                                shape = RoundedCornerShape(4.dp)
+                                            ) {
+                                                Text(
+                                                    text = "PAID",
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                                                    color = ColorIncome,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                )
+                                            }
+                                        }
+                                    }
                                     Text(
                                         text = "Debt Min • ${debt.type.name.replace('_', ' ').lowercase()}",
                                         style = MaterialTheme.typography.labelSmall,
@@ -1237,7 +1265,11 @@ fun CashFlowCalendarCard(
                             }
                             Text(
                                 text = currencyFormat.format(debt.minimumPayment),
-                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    textDecoration = if (isPaid) TextDecoration.LineThrough else TextDecoration.None
+                                ),
+                                color = if (isPaid) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface
                             )
                         }
                     }

@@ -28,8 +28,8 @@ import com.example.financehome.service.SpendingAlertManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 import java.time.LocalDate
+import kotlin.math.roundToInt
 import java.time.ZoneId
 import java.util.Locale
 import java.util.UUID
@@ -231,9 +231,9 @@ class DebtsViewModel @Inject constructor(
         }
     }
 
-    fun toggleDebtPaid(debt: Debt) {
+    fun toggleDebtPaid(debt: Debt, targetDate: LocalDate? = null) {
         viewModelScope.launch {
-            debtRepo.toggleDebtPaid(debt)
+            debtRepo.toggleDebtPaid(debt, targetDate)
         }
     }
 

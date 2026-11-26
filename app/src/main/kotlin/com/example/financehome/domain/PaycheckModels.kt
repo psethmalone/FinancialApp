@@ -139,7 +139,8 @@ data class MonthlyEventItem(
     val amount: Double,
     val isIncome: Boolean,
     val isPaid: Boolean,
-    val originalBill: Bill? = null
+    val originalBill: Bill? = null,
+    val originalDebt: Debt? = null
 )
 
 enum class OutlookStatusLevel(val label: String) {
