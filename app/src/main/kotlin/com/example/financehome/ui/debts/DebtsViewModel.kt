@@ -264,6 +264,8 @@ class DebtsViewModel @Inject constructor(
                 dueDayOfMonth = dueDayOfMonth.coerceIn(1, 31),
                 isPaidThisMonth = isPaid,
                 lastPaidTimestampMillis = lastPaid,
+                nextDueDateEpochDay = existing?.nextDueDateEpochDay ?: 0L,
+                lastSettledDateEpochDay = existing?.lastSettledDateEpochDay,
                 isSynced = false
             )
             debtRepo.updateDebt(updated)
@@ -272,14 +274,7 @@ class DebtsViewModel @Inject constructor(
 
     fun payDebt(debt: Debt, paymentAmount: Double) {
         viewModelScope.launch {
-            val newBalance = maxOf(0.0, debt.currentBalance - paymentAmount)
-            debtRepo.updateDebt(
-                debt.copy(
-                    currentBalance = newBalance,
-                    isPaidThisMonth = true,
-                    lastPaidTimestampMillis = System.currentTimeMillis()
-                )
-            )
+            debtRepo.payDebt(debt.id, paymentAmount)
             val isExtra = paymentAmount > debt.minimumPayment
             val extraFormatted = String.format(Locale.US, "%.2f", paymentAmount - debt.minimumPayment)
             val note = if (isExtra) "Debt Payment ($${extraFormatted} extra)" else "Debt Minimum Payment"

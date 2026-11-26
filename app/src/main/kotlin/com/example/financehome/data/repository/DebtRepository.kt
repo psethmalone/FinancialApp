@@ -70,7 +70,12 @@ class DebtRepository @Inject constructor(
         targetDate: java.time.LocalDate? = null,
         currentDate: java.time.LocalDate = java.time.LocalDate.now()
     ) {
-        val dueToSettle = targetDate ?: debt.getEffectiveNextDueDate(currentDate)
+        val thisMonthDue = try {
+            currentDate.withDayOfMonth(minOf(debt.dueDayOfMonth, currentDate.lengthOfMonth()))
+        } catch (_: Exception) {
+            currentDate
+        }
+        val dueToSettle = targetDate ?: thisMonthDue
         val currentlyPaid = debt.isPaidForDate(dueToSettle, currentDate)
         if (currentlyPaid) {
             unmarkDebtPaid(debt, targetDate = dueToSettle, currentDate = currentDate)

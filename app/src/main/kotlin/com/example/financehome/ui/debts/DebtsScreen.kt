@@ -34,6 +34,7 @@ import com.example.financehome.ui.theme.ColorExpense
 import com.example.financehome.ui.theme.ColorIncome
 import com.example.financehome.ui.theme.ColorWarning
 import java.text.NumberFormat
+import java.time.LocalDate
 import java.util.Locale
 
 enum class ObligationTab { BILLS, DEBTS }
@@ -250,7 +251,8 @@ fun DebtsScreen(
                             currencyFormat = currencyFormat,
                             onClick = { onDebtSelected(debt) },
                             onEdit = { debtToEdit = debt },
-                            onPay = { debtToPay = debt }
+                            onPay = { debtToPay = debt },
+                            onTogglePaid = { viewModel.toggleDebtPaid(debt) }
                         )
                     }
                 }
@@ -455,7 +457,8 @@ fun DebtCardItem(
     currencyFormat: NumberFormat,
     onClick: () -> Unit,
     onEdit: () -> Unit,
-    onPay: () -> Unit
+    onPay: () -> Unit,
+    onTogglePaid: () -> Unit = {}
 ) {
     val aprPercent = debt.apr * 100.0
     val aprColor = when {
@@ -464,15 +467,23 @@ fun DebtCardItem(
         else -> ColorIncome
     }
 
+    val today = LocalDate.now()
+    val thisMonthDue = try {
+        today.withDayOfMonth(minOf(debt.dueDayOfMonth, today.lengthOfMonth()))
+    } catch (_: Exception) {
+        today
+    }
+    val isPaid = debt.isPaidForDate(thisMonthDue, today)
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
+            containerColor = if (isPaid) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surface
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isPaid) 0.dp else 2.dp)
     ) {
         Column(
             modifier = Modifier
@@ -485,56 +496,75 @@ fun DebtCardItem(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            text = debt.name,
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    IconButton(onClick = onTogglePaid) {
+                        Icon(
+                            imageVector = if (isPaid) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                            contentDescription = if (isPaid) "Mark Unpaid" else "Mark Paid",
+                            tint = if (isPaid) ColorIncome else MaterialTheme.colorScheme.outline
                         )
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
+                    }
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Text(
-                                text = "Due Day ${debt.dueDayOfMonth}",
-                                style = MaterialTheme.typography.labelSmall.copy(
+                                text = debt.name,
+                                style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 10.sp
+                                    textDecoration = if (isPaid) TextDecoration.LineThrough else TextDecoration.None
                                 ),
-                                color = MaterialTheme.colorScheme.secondary,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                color = if (isPaid) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
                             )
-                        }
-                    }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            text = debt.type.name.replace("_", " "),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        if (debt.isPaidThisMonth) {
                             Surface(
                                 shape = RoundedCornerShape(4.dp),
-                                color = ColorIncome.copy(alpha = 0.15f)
+                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
                             ) {
                                 Text(
-                                    text = "Paid this cycle",
+                                    text = "Due Day ${debt.dueDayOfMonth}",
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 10.sp
                                     ),
-                                    color = ColorIncome,
-                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                    color = MaterialTheme.colorScheme.secondary,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
+                            }
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = debt.type.name.replace("_", " "),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (isPaid) {
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = ColorIncome.copy(alpha = 0.15f),
+                                    modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable { onTogglePaid() }
+                                ) {
+                                    Text(
+                                        text = "Paid this cycle",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 10.sp
+                                        ),
+                                        color = ColorIncome,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                    )
+                                }
                             }
                         }
                     }

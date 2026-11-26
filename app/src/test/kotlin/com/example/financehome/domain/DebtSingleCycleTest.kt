@@ -219,4 +219,86 @@ class DebtSingleCycleTest {
         val aprDue = debt.advanceDueDate(LocalDate.of(2026, 3, 31))
         assertEquals(LocalDate.of(2026, 4, 30), aprDue)
     }
+
+    @Test
+    fun testMonthlyGlimpseFutureMonthsDoNotMarkRestitutionPaid() {
+        // Cars debt: 362.0 unpaid
+        val carDebt = Debt(
+            id = "car_loans",
+            name = "Cars",
+            originalBalance = 15000.0,
+            currentBalance = 12000.0,
+            apr = 0.05,
+            minimumPayment = 362.0,
+            type = DebtType.LOAN,
+            createdAtMillis = 0L,
+            dueDayOfMonth = 10,
+            isPaidThisMonth = false,
+            nextDueDateEpochDay = 0L
+        )
+
+        // Restitution debt: 150.0 minimum payment, legacy isPaidThisMonth = true
+        val restitutionDebt = Debt(
+            id = "restitution_debt",
+            name = "Restitution",
+            originalBalance = 5000.0,
+            currentBalance = 3500.0,
+            apr = 0.0,
+            minimumPayment = 150.0,
+            type = DebtType.OTHER,
+            createdAtMillis = 0L,
+            dueDayOfMonth = 15,
+            isPaidThisMonth = true,
+            nextDueDateEpochDay = 0L // Legacy or just settled for this month
+        )
+
+        val config = PaycheckConfig(
+            frequency = PayFrequency.BI_WEEKLY,
+            typicalTakeHomePay = 2000.0,
+            anchorPayDateEpochDay = LocalDate.of(2026, 11, 6).toEpochDay()
+        )
+
+        // Current month (November 2026):
+        // Restitution is marked as paid for this month, car debt is unpaid (362.0)
+        val novGlimpse = PaycheckCalculator.calculateMonthlyGlimpse(
+            year = 2026,
+            month = 11,
+            bills = emptyList(),
+            debts = listOf(carDebt, restitutionDebt),
+            config = config,
+            anchorPayDate = LocalDate.of(2026, 11, 6),
+            currentTakeHomePay = 2000.0
+        )
+
+        assertEquals("Total debts should include both cars and restitution (362 + 150 = 512)", 512.0, novGlimpse.totalDebts, 0.01)
+        assertEquals("November unpaid debts should only be 362.0 because restitution was paid this month", 362.0, novGlimpse.unpaidDebts, 0.01)
+
+        // Future month (December 2026):
+        // Restitution MUST NOT be marked paid for December! Unpaid debts MUST be 512.0 (both cars + restitution)!
+        val decGlimpse = PaycheckCalculator.calculateMonthlyGlimpse(
+            year = 2026,
+            month = 12,
+            bills = emptyList(),
+            debts = listOf(carDebt, restitutionDebt),
+            config = config,
+            anchorPayDate = LocalDate.of(2026, 11, 6),
+            currentTakeHomePay = 2000.0
+        )
+
+        assertEquals("December total debts should be 512.0", 512.0, decGlimpse.totalDebts, 0.01)
+        assertEquals("December unpaid debts MUST be 512.0 (NOT 362.0). Restitution is NOT paid for future months!", 512.0, decGlimpse.unpaidDebts, 0.01)
+
+        // Future month (January 2027):
+        val janGlimpse = PaycheckCalculator.calculateMonthlyGlimpse(
+            year = 2027,
+            month = 1,
+            bills = emptyList(),
+            debts = listOf(carDebt, restitutionDebt),
+            config = config,
+            anchorPayDate = LocalDate.of(2026, 11, 6),
+            currentTakeHomePay = 2000.0
+        )
+
+        assertEquals("January unpaid debts MUST be 512.0", 512.0, janGlimpse.unpaidDebts, 0.01)
+    }
 }

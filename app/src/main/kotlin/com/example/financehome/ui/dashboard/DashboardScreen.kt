@@ -1189,9 +1189,14 @@ fun UnifiedMonthlyHeroCard(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 if (nextEvent.isPaid) {
+                                    val onToggle = {
+                                        if (nextEvent.originalBill != null) onToggleBillPaid(nextEvent.originalBill, nextEvent.date)
+                                        else if (nextEvent.originalDebt != null) onToggleDebtPaid(nextEvent.originalDebt, nextEvent.date)
+                                    }
                                     Surface(
                                         color = ColorIncome.copy(alpha = 0.15f),
-                                        shape = RoundedCornerShape(4.dp)
+                                        shape = RoundedCornerShape(4.dp),
+                                        modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable { onToggle() }
                                     ) {
                                         Text(
                                             text = "PAID",
@@ -1331,7 +1336,8 @@ fun UnifiedMonthlyHeroCard(
                                     if (event.isPaid) {
                                         Surface(
                                             color = ColorIncome.copy(alpha = 0.15f),
-                                            shape = RoundedCornerShape(6.dp)
+                                            shape = RoundedCornerShape(6.dp),
+                                            modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { onToggleBillPaid(event.originalBill, event.date) }
                                         ) {
                                             Text(
                                                 text = "PAID",
@@ -1354,7 +1360,8 @@ fun UnifiedMonthlyHeroCard(
                                     if (event.isPaid) {
                                         Surface(
                                             color = ColorIncome.copy(alpha = 0.15f),
-                                            shape = RoundedCornerShape(6.dp)
+                                            shape = RoundedCornerShape(6.dp),
+                                            modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { onToggleDebtPaid(event.originalDebt, event.date) }
                                         ) {
                                             Text(
                                                 text = "PAID",

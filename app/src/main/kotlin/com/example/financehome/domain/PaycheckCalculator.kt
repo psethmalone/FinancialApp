@@ -822,7 +822,7 @@ object PaycheckCalculator {
         val unpaidDebts = debts.filter {
             val dueDay = minOf(it.dueDayOfMonth, daysInMonth)
             val dueDate = LocalDate.of(year, month, dueDay)
-            it.currentBalance > 0.0 && !it.isPaidForDate(dueDate, currentDate = if (isCurrentMonth) LocalDate.now() else LocalDate.of(year, month, 1))
+            it.currentBalance > 0.0 && !it.isPaidForDate(dueDate)
         }.sumOf { it.minimumPayment }
         val unpaidObligations = unpaidBills + unpaidDebts
 
